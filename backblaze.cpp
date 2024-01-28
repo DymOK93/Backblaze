@@ -55,8 +55,12 @@ optional<Date> ParseDate(const filesystem::path& file_path) {
   if (month < 1 || month > kMonthPerYear)
     return nullopt;
 
-  return Date{static_cast<uint16_t>(year - kFirstYear),
-              static_cast<uint8_t>(month - 1)};
+  const auto day{stoul(yy_mm_dd[2])};
+  if (day > kMaxDayPerMonth[month - 1])
+    return nullopt;
+
+  return Date{static_cast<uint16_t>(year), static_cast<uint8_t>(month),
+              static_cast<uint8_t>(day)};
 }
 
 //
@@ -80,8 +84,6 @@ void ReadRawStats(ModelMap& map, const filesystem::path& file_path) {
   ifstream input{file_path, ios::in | ios::binary};
   csv::CSVReader reader{input, csv::CSVFormat{}.header_row(0).delimiter(',')};
 
-  const auto& [year_idx, month_idx]{*date};
-
   for (const csv::CSVRow& row : reader) {
     auto model_name{NormalizeModelName(row["model"].get<string>())};
     auto& model_stats{map[std::move(model_name)]};
@@ -89,12 +91,12 @@ void ReadRawStats(ModelMap& map, const filesystem::path& file_path) {
     const string_view serial_number{row["serial_number"].get_sv()};
     auto& drive_stats{model_stats.drives[serial_number]};
 
-    const auto day_idx{static_cast<size_t>(year_idx) * kMonthPerYear +
-                       month_idx};
-    ++drive_stats.drive_day[day_idx];
+    const auto year_idx{static_cast<size_t>(date->year) - kFirstYear};
+    const auto month_idx{static_cast<size_t>(date->month) - 1};
+    ++drive_stats.drive_day[year_idx * kMonthPerYear + month_idx];
 
     if (row["failure"].get<int>() != 0) {
-      drive_stats.failure = true;
+      drive_stats.failure_date = *date;
     }
   }
 }
@@ -129,7 +131,12 @@ static auto MakeParsedStatsRow(const string& model_name,
   row.reserve(size(kOutputPrefix) + kCounterCount);
   row.push_back(model_name);
   row.push_back(serial_number);
-  row.emplace_back(drive_stats.failure ? "1" : "0");
+
+  const Date failure_date{drive_stats.failure_date.value_or(Date{})};
+  row.emplace_back(fmt::format("{}", failure_date.year));
+  row.emplace_back(fmt::format("{}", failure_date.month));
+  row.emplace_back(fmt::format("{}", failure_date.day));
+
   ranges::transform(drive_stats.drive_day, back_inserter(row),
                     [](uint64_t number) { return fmt::format("{}", number); });
   return row;
@@ -168,8 +175,9 @@ void MergeParsedStats(ModelMap& map, const ModelMap& other) {
       ranges::transform(drive_day, other_drive_stats.drive_day,
                         begin(drive_day), plus<uint64_t>{});
 
-      if (other_drive_stats.failure) {
-        drive_stats.failure = true;
+      if (const auto& other_failure_date = other_drive_stats.failure_date;
+          other_failure_date) {
+        drive_stats.failure_date = other_failure_date;
       }
     }
   }

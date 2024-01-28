@@ -37,19 +37,33 @@ namespace bb {
 inline constexpr size_t kDateLength{3};
 inline constexpr uint16_t kFirstYear{2013};
 inline constexpr uint16_t kLastYear{2023};
+
+//
+//
+//
 inline constexpr uint8_t kMonthPerYear{12};
+inline constexpr std::array<uint8_t, kMonthPerYear> kMaxDayPerMonth{
+    31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+
+//
+//
+//
 inline constexpr size_t kCounterCount{(kLastYear - kFirstYear + 1) *
                                       static_cast<size_t>(kMonthPerYear)};
 //
 //
 //
-inline constexpr std::array<std::string_view, 3> kOutputPrefix{
-    "model", "serial_number", "failure"};
+inline constexpr std::array<std::string_view, 6> kOutputPrefix{
+    "model", "serial_number", "failure_year", "failure_month", "failure_day"};
 
 //
 //
 //
-using Date = std::pair<uint16_t, uint8_t>;
+struct Date {
+  uint16_t year = 0;
+  uint8_t month = 0;
+  uint8_t day = 0;
+};
 
 //
 //
@@ -62,10 +76,10 @@ std::optional<Date> ParseDate(const std::filesystem::path& file_path);
 struct DriveStats {
   using Counters = std::vector<uint64_t>;
 
-  DriveStats() noexcept : drive_day(kCounterCount), failure{false} {}
+  DriveStats() noexcept : drive_day(kCounterCount) {}
 
   Counters drive_day;
-  bool failure;
+  std::optional<Date> failure_date;
 };
 
 //
