@@ -62,6 +62,16 @@ optional<Date> ParseDate(const filesystem::path& file_path) {
 //
 //
 //
+static ModelName NormalizeModelName(ModelName model_name) {
+  const auto [first, last]{std::ranges::remove_if(
+      model_name, [](unsigned char ch) { return isspace(ch); })};
+  model_name.erase(first, last);
+  return model_name;
+}
+
+//
+//
+//
 void ReadRawStats(ModelMap& map, const filesystem::path& file_path) {
   const auto date{ParseDate(file_path)};
   if (!date)
@@ -73,8 +83,8 @@ void ReadRawStats(ModelMap& map, const filesystem::path& file_path) {
   const auto& [year_idx, month_idx]{*date};
 
   for (const csv::CSVRow& row : reader) {
-    const string_view model_name{row["model"].get_sv()};
-    auto& model_stats{map[model_name]};
+    auto model_name{NormalizeModelName(row["model"].get<string>())};
+    auto& model_stats{map[std::move(model_name)]};
 
     const string_view serial_number{row["serial_number"].get_sv()};
     auto& drive_stats{model_stats.drives[serial_number]};
