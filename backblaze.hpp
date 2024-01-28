@@ -9,6 +9,9 @@
 #include <thread>
 
 namespace util {
+//
+//
+//
 template <class Duration>
 class Timer {
   using Clock = std::chrono::high_resolution_clock;
@@ -21,40 +24,121 @@ class Timer {
   }
 
  private:
-  Clock::time_point m_time_point = Clock::now();
+  Clock::time_point m_time_point{Clock::now()};
 };
 }  // namespace util
 
 namespace bb {
-struct Counters {
-  uint64_t drive_day = 0;
-  uint64_t failure = 0;
+//
+//
+//
+enum class Year {
+  kBase = 0,
+  k2013 = kBase,
+  k2014,
+  k2015,
+  k2016,
+  k2017,
+  k2018,
+  k2019,
+  k2020,
+  k2021,
+  k2022,
+  k2023,
+  kCount
+};
 
-  Counters& operator+=(const Counters& other) noexcept {
-    drive_day += other.drive_day;
-    failure += other.failure;
-    return *this;
+//
+//
+//
+inline constexpr size_t kDateLength{3};
+inline constexpr uint16_t kFirstYear{2013};
+inline constexpr uint8_t kMonthPerYear{12};
+inline constexpr size_t kCounterCount{static_cast<size_t>(Year::kCount) *
+                                      kMonthPerYear};
+//
+//
+//
+inline constexpr std::array<std::string_view, 3> kOutputPrefix{
+    "model", "serial_number", "failure"};
+
+//
+//
+//
+std::pair<Year, uint8_t> ParseDateIndex(const std::filesystem::path& file_path);
+
+//
+//
+//
+struct DriveStats {
+  using Counters = std::vector<uint64_t>;
+
+  DriveStats() noexcept : drive_day(kCounterCount), failure{false} {}
+
+  Counters drive_day;
+  bool failure;
+};
+
+//
+//
+//
+struct StringHash {
+  using is_transparent = void;
+  using is_avalanching = void;
+
+  [[nodiscard]] uint64_t operator()(std::string_view str) const noexcept {
+    return ankerl::unordered_dense::hash<std::string_view>{}(str);
   }
 };
 
-struct Stats {
-  Counters counters;
+//
+//
+//
+using SerialNumber = std::string;
 
-  void merge(const Stats& other) noexcept { counters += other.counters; }
+//
+//
+//
+struct ModelStats {
+  using DriveMap = ankerl::unordered_dense::
+      map<SerialNumber, DriveStats, StringHash, std::equal_to<>>;
+
+  DriveMap drives;
 };
 
-using ModelStats = ankerl::unordered_dense::map<std::string, Stats>;
+//
+//
+//
+using ModelName = std::string;
+using ModelMap = ankerl::unordered_dense::
+    map<ModelName, ModelStats, StringHash, std::equal_to<>>;
 
-void readRawStats(ModelStats& map, const std::filesystem::path& file_path);
-void readParsedStats(ModelStats& map, const std::filesystem::path& file_path);
-void writeParsedStats(const ModelStats& map,
-                      const std::filesystem::path& file_path,
-                      bool enable_merge);
-void mergeParsedStats(ModelStats& map, const ModelStats& other);
+//
+//
+//
+void ReadRawStats(ModelMap& map, const std::filesystem::path& file_path);
+
+//
+//
+//
+void ReadParsedStats(ModelStats& map, const std::filesystem::path& file_path);
+
+//
+//
+//
+void WriteParsedStats(const ModelMap& map,
+                      const std::filesystem::path& file_path);
+//
+//
+//
+void MergeParsedStats(ModelMap& map, const ModelMap& other);
 }  // namespace bb
 
+//
+//
+//
 template <class DirIt>
-bb::ModelStats parseStats(DirIt it) {
+bb::ModelMap ParseRawStats(DirIt it) {
   const auto thread_count{std::thread::hardware_concurrency()};
 
   std::mutex it_mutex;
@@ -75,7 +159,7 @@ bb::ModelStats parseStats(DirIt it) {
     return csv_path;
   }};
 
-  std::vector<bb::ModelStats> maps(thread_count);
+  std::vector<bb::ModelMap> maps(thread_count);
   std::vector<std::thread> workers(thread_count);
 
   for (size_t idx = 0; idx < thread_count; ++idx) {
@@ -88,7 +172,7 @@ bb::ModelStats parseStats(DirIt it) {
           break;
         }
 
-        readRawStats(stats, file_path);
+        ReadRawStats(stats, file_path);
       }
     }};
   }
@@ -97,9 +181,9 @@ bb::ModelStats parseStats(DirIt it) {
     worker.join();
   }
 
-  bb::ModelStats result;
+  bb::ModelMap result;
   for (auto& stats : maps) {
-    mergeParsedStats(result, stats);
+    MergeParsedStats(result, stats);
   }
 
   return result;

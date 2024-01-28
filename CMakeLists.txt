@@ -10,6 +10,9 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/exe")
 set(CMAKE_MSVC_RUNTIME_LIBRARY 
 		"MultiThreaded$<$<CONFIG:Debug>:Debug>")	# static MSVC runtime (/MT)
 
+set(Boost_USE_STATIC_LIBS ON)
+
+find_package(Boost REQUIRED COMPONENTS)
 find_package(fmt CONFIG REQUIRED)
 
 add_subdirectory(csv-parser)
@@ -24,7 +27,7 @@ set(RELEASE_COMPILE_OPTIONS
 		/Ob3	# Aggressive inlining
 		/Oi     # Enable intrinsics
 		/Ot     # Prefer fast code
-		/Oy)	    # Omit frame pointers
+		/Oy)	# Omit frame pointers
 
 set(LTO_COMPILE_OPTIONS
 		/Gy		# Using COMDAT folding for functions
@@ -56,6 +59,7 @@ target_link_options(Backblaze PRIVATE
 		$<$<CONFIG:Release>:${LTO_LINK_OPTIONS}>)
 
 target_link_libraries(Backblaze PRIVATE
+		Boost::boost
 		csv
 		fmt::fmt-header-only
 		unordered_dense::unordered_dense)

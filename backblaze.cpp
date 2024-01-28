@@ -1,9 +1,11 @@
 ﻿#include "backblaze.hpp"
 
+#include <boost/algorithm/string/classification.hpp>
+#include <boost/algorithm/string/split.hpp>
 #include "csv-parser/include/csv.hpp"
 #include "unordered_dense/include/ankerl/unordered_dense.h"
 
-#include <array>
+#include <algorithm>
 #include <chrono>
 #include <fstream>
 #include <stdexcept>
@@ -21,12 +23,12 @@ int main(int argc, char* argv[]) {
     fmt::print("Input: {}\nOutput: {}\n", input.string(), output.string());
 
     const util::Timer<chrono::seconds> timer;
-    const bb::ModelStats stats{
-        parseStats(filesystem::recursive_directory_iterator{input})};
+    const bb::ModelMap model_map{
+        ParseRawStats(filesystem::recursive_directory_iterator{input})};
     fmt::print("Finished: {} seconds\n", timer.elapsed().count());
-    writeParsedStats(stats, output, true);
+    WriteParsedStats(model_map, output);
 
-  } catch (const std::exception& exc) {
+  } catch (const exception& exc) {
     printf("%s\n", exc.what());
     return EXIT_FAILURE;
   }
@@ -34,61 +36,138 @@ int main(int argc, char* argv[]) {
 }
 
 namespace bb {
-template <class Parser>
-static void readStatsImpl(ModelStats& map,
-                          const filesystem::path& file_path,
-                          Parser parser) {
-  std::ifstream input(file_path, std::ios::in | std::ios::binary);
-  csv::CSVReader reader{input, csv::CSVFormat{}.header_row(0).delimiter(',')};
+//
+//
+//
+pair<Year, uint8_t> ParseDateIndex(const filesystem::path& file_path) {
+  vector<string> yy_mm_dd;
+  yy_mm_dd.reserve(kDateLength);
 
-  for (const csv::CSVRow& row : reader) {  // Input iterator
-    auto model = row["model"].get<string>();
-    const Stats stats{parser(row)};
-    map[std::move(model)].merge(stats);
+  split(yy_mm_dd, file_path.filename().string(), boost::is_any_of("-"));
+  if (size(yy_mm_dd) != kDateLength)
+    throw invalid_argument{"Invalid filename format"};
+
+  const auto year{stoul(yy_mm_dd[0])};
+  if (year < kFirstYear ||
+      year >= kFirstYear + static_cast<uint16_t>(Year::kCount)) {
+    throw invalid_argument{"Invalid year"};
+  }
+
+  const auto month{stoul(yy_mm_dd[1])};
+  if (month < 1 || month > kMonthPerYear) {
+    throw invalid_argument{"Invalid month"};
+  }
+
+  return {static_cast<Year>(year - kFirstYear), static_cast<uint8_t>(month)};
+}
+
+//
+//
+//
+static csv::CSVReader MakeCsvReader(const filesystem::path& file_path) {
+  return csv::CSVReader{file_path.string(),
+                        csv::CSVFormat{}.header_row(0).delimiter(',')};
+}
+
+//
+//
+//
+void ReadRawStats(ModelMap& map, const filesystem::path& file_path) {
+  const auto [year_idx, month_idx]{ParseDateIndex(file_path)};
+  auto reader{MakeCsvReader(file_path)};
+
+  for (const csv::CSVRow& row : reader) {
+    const string_view model_name{row["model"].get_sv()};
+    auto& model_stats{map[model_name]};
+
+    const string_view serial_number{row["serial_number"].get_sv()};
+    auto& drive_stats{model_stats.drives[serial_number]};
+
+    const auto day_idx{static_cast<size_t>(year_idx) * kMonthPerYear +
+                       month_idx};
+    ++drive_stats.drive_day[day_idx];
+
+    if (row["failure"].get<int>() != 0) {
+      drive_stats.failure = true;
+    }
   }
 }
 
-void readRawStats(ModelStats& map, const filesystem::path& file_path) {
-  readStatsImpl(map, file_path, [](const csv::CSVRow& row) -> Stats {
-    const auto failure = row["failure"].get<uint64_t>();
-    return {1, failure};
-  });
-}
+//
+//
+//
+static vector<string> MakeParsedStatsHeader() {
+  vector<string> header;
+  header.reserve(size(kOutputPrefix) + kCounterCount);
 
-void readParsedStats(ModelStats& map, const std::filesystem::path& file_path) {
-  readStatsImpl(map, file_path, [](const csv::CSVRow& row) -> Stats {
-    const auto drive_day = row["drive_day"].get<uint64_t>();
-    const auto failure = row["failure"].get<uint64_t>();
-    return {drive_day, failure};
-  });
-}
-
-void writeParsedStats(const ModelStats& map,
-                      const filesystem::path& file_path,
-                      bool enable_merge) {
-  if (enable_merge && exists(file_path)) {
-    ModelStats merged_map;
-    readParsedStats(merged_map, file_path);
-    mergeParsedStats(merged_map, map);
-    return writeParsedStats(merged_map, file_path, false);
+  for (const auto& prefix : kOutputPrefix) {
+    header.emplace_back(prefix);
   }
 
-  std::ofstream output{file_path};
+  for (auto year_idx = static_cast<uint16_t>(Year::kBase);
+       year_idx != static_cast<uint16_t>(Year::kCount); ++year_idx) {
+    for (uint8_t month_idx = 0; month_idx < kMonthPerYear; ++month_idx) {
+      header.push_back(
+          fmt::format("Y{}_M{}", year_idx + kFirstYear, month_idx + 1));
+    }
+  }
+
+  return header;
+}
+
+//
+//
+//
+static auto MakeParsedStatsRow(const string& model_name,
+                               const string& serial_number,
+                               const DriveStats& drive_stats) {
+  vector<string> row;
+  row.reserve(size(kOutputPrefix) + kCounterCount);
+  row.push_back(model_name);
+  row.push_back(serial_number);
+  row.emplace_back(drive_stats.failure ? "1" : "0");
+  ranges::transform(drive_stats.drive_day, back_inserter(row),
+                    [](uint64_t number) { return fmt::format("{}", number); });
+  return row;
+}
+
+//
+//
+//
+void WriteParsedStats(const ModelMap& map, const filesystem::path& file_path) {
+  ofstream output{file_path};
   auto writer{csv::make_csv_writer_buffered(output)};
 
-  writer << array<string_view, 3>{"model", "drive_day", "failure"};
+  writer << MakeParsedStatsHeader();
 
-  for (const auto& [model, stats] : map) {
-    const auto& [drive_day, failure]{stats.counters};
-    writer << make_tuple(model, drive_day, failure);
+  for (const auto& [model_name, model_stats] : map) {
+    for (const auto& [serial_number, drive_stats] : model_stats.drives) {
+      writer << MakeParsedStatsRow(model_name, serial_number, drive_stats);
+    }
   }
 
   writer.flush();
 }
 
-void mergeParsedStats(ModelStats& map, const ModelStats& other) {
-  for (const auto& [model, stats] : other) {
-    map[model].merge(stats);
+//
+//
+//
+void MergeParsedStats(ModelMap& map, const ModelMap& other) {
+  for (const auto& [model_name, other_model_stats] : other) {
+    auto& model_stats{map[model_name]};
+
+    for (const auto& [serial_number, other_drive_stats] :
+         other_model_stats.drives) {
+      auto& drive_stats{model_stats.drives[serial_number]};
+      auto& drive_day{drive_stats.drive_day};
+
+      ranges::transform(drive_day, other_drive_stats.drive_day,
+                        begin(drive_day), plus<uint64_t>{});
+
+      if (other_drive_stats.failure) {
+        drive_stats.failure = true;
+      }
+    }
   }
 }
 }  // namespace bb
