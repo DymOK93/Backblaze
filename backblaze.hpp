@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -33,30 +34,12 @@ namespace bb {
 //
 //
 //
-enum class Year {
-  kBase = 0,
-  k2013 = kBase,
-  k2014,
-  k2015,
-  k2016,
-  k2017,
-  k2018,
-  k2019,
-  k2020,
-  k2021,
-  k2022,
-  k2023,
-  kCount
-};
-
-//
-//
-//
 inline constexpr size_t kDateLength{3};
 inline constexpr uint16_t kFirstYear{2013};
+inline constexpr uint16_t kLastYear{2023};
 inline constexpr uint8_t kMonthPerYear{12};
-inline constexpr size_t kCounterCount{static_cast<size_t>(Year::kCount) *
-                                      kMonthPerYear};
+inline constexpr size_t kCounterCount{(kLastYear - kFirstYear + 1) *
+                                      static_cast<size_t>(kMonthPerYear)};
 //
 //
 //
@@ -66,7 +49,12 @@ inline constexpr std::array<std::string_view, 3> kOutputPrefix{
 //
 //
 //
-std::pair<Year, uint8_t> ParseDateIndex(const std::filesystem::path& file_path);
+using Date = std::pair<uint16_t, uint8_t>;
+
+//
+//
+//
+std::optional<Date> ParseDate(const std::filesystem::path& file_path);
 
 //
 //
@@ -166,14 +154,17 @@ bb::ModelMap ParseRawStats(DirIt it) {
   for (size_t idx = 0; idx < thread_count; ++idx) {
     workers[idx] = std::thread{[idx, &maps, &get_next_file_path]() {
       auto& stats{maps[idx]};
-
       for (;;) {
-        const std::filesystem::path file_path{get_next_file_path()};
-        if (file_path.empty()) {
-          break;
-        }
+        try {
+          const std::filesystem::path file_path{get_next_file_path()};
+          if (file_path.empty()) {
+            break;
+          }
 
-        ReadRawStats(stats, file_path);
+          ReadRawStats(stats, file_path);
+        } catch (const std::exception& exc) {
+          printf("%s\n", exc.what());
+        }
       }
     }};
   }

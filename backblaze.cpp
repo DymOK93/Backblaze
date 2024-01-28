@@ -39,26 +39,24 @@ namespace bb {
 //
 //
 //
-pair<Year, uint8_t> ParseDateIndex(const filesystem::path& file_path) {
+optional<Date> ParseDate(const filesystem::path& file_path) {
   vector<string> yy_mm_dd;
   yy_mm_dd.reserve(kDateLength);
 
   split(yy_mm_dd, file_path.filename().string(), boost::is_any_of("-"));
   if (size(yy_mm_dd) != kDateLength)
-    throw invalid_argument{"Invalid filename format"};
+    return nullopt;
 
   const auto year{stoul(yy_mm_dd[0])};
-  if (year < kFirstYear ||
-      year >= kFirstYear + static_cast<uint16_t>(Year::kCount)) {
-    throw invalid_argument{"Invalid year"};
-  }
+  if (year < kFirstYear || year > kLastYear)
+    return nullopt;
 
   const auto month{stoul(yy_mm_dd[1])};
-  if (month < 1 || month > kMonthPerYear) {
-    throw invalid_argument{"Invalid month"};
-  }
+  if (month < 1 || month > kMonthPerYear)
+    return nullopt;
 
-  return {static_cast<Year>(year - kFirstYear), static_cast<uint8_t>(month)};
+  return Date{static_cast<uint16_t>(year - kFirstYear),
+              static_cast<uint8_t>(month - 1)};
 }
 
 //
@@ -73,7 +71,11 @@ static csv::CSVReader MakeCsvReader(const filesystem::path& file_path) {
 //
 //
 void ReadRawStats(ModelMap& map, const filesystem::path& file_path) {
-  const auto [year_idx, month_idx]{ParseDateIndex(file_path)};
+  const auto date{ParseDate(file_path)};
+  if (!date)
+    throw invalid_argument{"Invalid filename format"};
+
+  const auto& [year_idx, month_idx]{*date};
   auto reader{MakeCsvReader(file_path)};
 
   for (const csv::CSVRow& row : reader) {
@@ -104,11 +106,9 @@ static vector<string> MakeParsedStatsHeader() {
     header.emplace_back(prefix);
   }
 
-  for (auto year_idx = static_cast<uint16_t>(Year::kBase);
-       year_idx != static_cast<uint16_t>(Year::kCount); ++year_idx) {
-    for (uint8_t month_idx = 0; month_idx < kMonthPerYear; ++month_idx) {
-      header.push_back(
-          fmt::format("Y{}_M{}", year_idx + kFirstYear, month_idx + 1));
+  for (auto year = kFirstYear; year <= kLastYear; ++year) {
+    for (uint8_t month = 1; month <= kMonthPerYear; ++month) {
+      header.push_back(fmt::format("Y{}_M{}", year, month));
     }
   }
 
