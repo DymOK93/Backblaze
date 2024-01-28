@@ -62,21 +62,15 @@ optional<Date> ParseDate(const filesystem::path& file_path) {
 //
 //
 //
-static csv::CSVReader MakeCsvReader(const filesystem::path& file_path) {
-  return csv::CSVReader{file_path.string(),
-                        csv::CSVFormat{}.header_row(0).delimiter(',')};
-}
-
-//
-//
-//
 void ReadRawStats(ModelMap& map, const filesystem::path& file_path) {
   const auto date{ParseDate(file_path)};
   if (!date)
     throw invalid_argument{"Invalid filename format"};
 
+  ifstream input{file_path, ios::in | ios::binary};
+  csv::CSVReader reader{input, csv::CSVFormat{}.header_row(0).delimiter(',')};
+
   const auto& [year_idx, month_idx]{*date};
-  auto reader{MakeCsvReader(file_path)};
 
   for (const csv::CSVRow& row : reader) {
     const string_view model_name{row["model"].get_sv()};

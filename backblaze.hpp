@@ -162,6 +162,7 @@ bb::ModelMap ParseRawStats(DirIt it) {
           }
 
           ReadRawStats(stats, file_path);
+
         } catch (const std::exception& exc) {
           printf("%s\n", exc.what());
         }
