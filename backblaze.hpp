@@ -69,11 +69,6 @@ struct Date {
 //
 //
 //
-std::optional<Date> ParseDate(const std::filesystem::path& file_path);
-
-//
-//
-//
 struct DriveStats {
   using Counters = std::vector<uint64_t>;
 
@@ -94,10 +89,8 @@ using SerialNumber = std::string;
 struct ModelStats {
   using DriveMap = ankerl::unordered_dense::map<SerialNumber, DriveStats>;
 
-  ModelStats(uint64_t bytes_count) noexcept : capacity_bytes{bytes_count} {}
-
   DriveMap drives;
-  uint64_t capacity_bytes;
+  std::optional<uint64_t> capacity_bytes;
 };
 
 //
