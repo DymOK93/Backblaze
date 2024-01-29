@@ -28,8 +28,16 @@ int main(int argc, char* argv[]) {
     fmt::print("Input: {}\nOutput: {}\n", input.string(), output.string());
 
     const util::Timer<chrono::seconds> timer;
-    const bb::ModelMap model_map{
-        ParseRawStats(filesystem::recursive_directory_iterator{input})};
+    const bb::ModelMap model_map{[&input] {
+      if (is_directory(input)) {
+        return ParseRawStats(filesystem::recursive_directory_iterator{input});
+      }
+
+      bb::ModelMap map;
+      ReadRawStats(map, input);
+      return map;
+    }()};
+
     fmt::print("Finished: {} seconds\n", timer.elapsed().count());
     WriteParsedStats(model_map, output);
 
