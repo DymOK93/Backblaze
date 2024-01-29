@@ -74,38 +74,37 @@ static string ToString(const Ty& value) {
 //
 //
 //
-static optional<Date> ReadDateImpl(csv::CSVField field) {
+static Date ReadDate(csv::CSVField field) {
   vector<string_view> yy_mm_dd;
   yy_mm_dd.reserve(kDateLength);
 
   split(yy_mm_dd, field.get<string_view>(), boost::is_any_of("-"));
-  if (size(yy_mm_dd) != kDateLength)
-    return nullopt;
-
-  const auto year{ToInt<uint16_t>(yy_mm_dd[0])};
-  if (year < kFirstYear || year > kLastYear)
-    return nullopt;
-
-  const auto month{ToInt<uint8_t>(yy_mm_dd[1])};
-  if (month < 1 || month > kMonthPerYear)
-    return nullopt;
-
-  const auto day{ToInt<uint8_t>(yy_mm_dd[2])};
-  if (day > kMaxDayPerMonth[month - 1])
-    return nullopt;
-
-  return Date{year, month, day};
-}
-
-//
-//
-//
-static Date ReadDate(const csv::CSVField& field) {
-  const optional date{ReadDateImpl(field)};
-  if (!date) {
+  if (size(yy_mm_dd) != kDateLength) {
     throw invalid_argument{"Invalid date format"};
   }
-  return *date;
+
+  do {
+    const auto year{ToInt<uint16_t>(yy_mm_dd[0])};
+    if (year < kFirstYear || year > kLastYear) {
+      break;
+    }
+
+    const auto month{ToInt<uint8_t>(yy_mm_dd[1])};
+    if (month < 1 || month > kMonthPerYear) {
+      break;
+    }
+
+    const auto day{ToInt<uint8_t>(yy_mm_dd[2])};
+    if (day > kMaxDayPerMonth[month - 1]) {
+      break;
+    }
+
+    return Date{year, month, day};
+
+  } while (false);
+
+  throw invalid_argument{fmt::format("Invalid date {}-{}-{}", yy_mm_dd[0],
+                                     yy_mm_dd[1], yy_mm_dd[2])};
 }
 
 //
