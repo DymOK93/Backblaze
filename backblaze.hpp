@@ -77,6 +77,30 @@ namespace bb {
 //
 //
 //
+constexpr uint64_t BytesToGBytes(uint64_t bytes_count) noexcept {
+  return bytes_count * 1000 * 1000 * 1000;
+}
+
+//
+//
+//
+constexpr uint64_t BytesToTBytes(uint64_t bytes_count) noexcept {
+  return BytesToGBytes(bytes_count) * 1000;
+}
+
+//
+// Very old drives
+//
+inline constexpr uint64_t kMinCapacityBytes{BytesToGBytes(40)};
+
+//
+// Modern HAMR drives
+//
+inline constexpr uint64_t kMaxCapacityBytes{BytesToTBytes(40)};
+
+//
+//
+//
 inline constexpr size_t kDateLength{3};
 inline constexpr uint16_t kFirstYear{2013};
 inline constexpr uint16_t kLastYear{2023};

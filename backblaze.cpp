@@ -123,7 +123,7 @@ static string ReadId(const rapidcsv::Document& doc,
 static optional<uint64_t> ReadCapacity(const rapidcsv::Document& doc,
                                        size_t row_idx) {
   const auto capacity{doc.GetCell<int64_t>("capacity_bytes", row_idx)};
-  if (capacity < 0) {
+  if (capacity < kMinCapacityBytes || capacity > kMaxCapacityBytes) {
     return nullopt;
   }
   return static_cast<uint64_t>(capacity);
@@ -131,14 +131,15 @@ static optional<uint64_t> ReadCapacity(const rapidcsv::Document& doc,
 
 static void UpdateCapacity(const ModelName& model_name,
                            ModelStats& model_stats,
-                           uint64_t capacity_bytes) {
-  if (auto& capacity = model_stats.capacity_bytes; capacity_bytes > capacity) {
-    if (capacity) {
-      fmt::print("{} capacity change: was {}, now {}", model_name, *capacity,
-                 capacity_bytes);
+                           uint64_t new_capacity) {
+  if (auto& capacity_bytes = model_stats.capacity_bytes;
+             new_capacity > capacity_bytes) {
+    if (capacity_bytes) {
+      fmt::print("{} capacity change: was {}, now {}", model_name,
+                 *capacity_bytes, new_capacity);
     }
 
-    capacity = capacity_bytes;
+    capacity_bytes = new_capacity;
   }
 }
 
