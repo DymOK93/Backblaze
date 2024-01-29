@@ -53,8 +53,9 @@ inline constexpr size_t kCounterCount{(kLastYear - kFirstYear + 1) *
 //
 //
 //
-inline constexpr std::array kOutputPrefix{
-    "model", "serial_number", "failure_year", "failure_month", "failure_day"};
+inline constexpr std::array kOutputPrefix{"model",          "serial_number",
+                                          "capacity_bytes", "failure_year",
+                                          "failure_month",  "failure_day"};
 
 //
 //
@@ -93,7 +94,10 @@ using SerialNumber = std::string;
 struct ModelStats {
   using DriveMap = ankerl::unordered_dense::map<SerialNumber, DriveStats>;
 
+  ModelStats(uint64_t bytes_count) noexcept : capacity_bytes{bytes_count} {}
+
   DriveMap drives;
+  uint64_t capacity_bytes;
 };
 
 //

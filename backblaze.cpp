@@ -20,6 +20,11 @@ int main(int argc, char* argv[]) {
 
     const filesystem::path input{argv[1]};
     const filesystem::path output{argv[2]};
+
+    if (output.extension() != ".csv") {
+      throw invalid_argument{"Only CSV output is supported"};
+    }
+
     fmt::print("Input: {}\nOutput: {}\n", input.string(), output.string());
 
     const util::Timer<chrono::seconds> timer;
@@ -66,7 +71,7 @@ optional<Date> ParseDate(const filesystem::path& file_path) {
 //
 //
 //
-static std::string RemoveSpaces(std::string str) {
+static string RemoveSpaces(string str) {
   const auto [first, last]{std::ranges::remove_if(
       str, [](unsigned char ch) { return isspace(ch); })};
   str.erase(first, last);
@@ -86,7 +91,9 @@ void ReadRawStats(ModelMap& map, const filesystem::path& file_path) {
 
   for (const csv::CSVRow& row : reader) {
     auto model_name{RemoveSpaces(row["model"].get<string>())};
-    auto& model_stats{map[std::move(model_name)]};
+    const auto capacity_bytes{row["capacity_bytes"].get<uint64_t>()};
+    auto& model_stats{
+        map.try_emplace(std::move(model_name), capacity_bytes).first->second};
 
     auto serial_number{RemoveSpaces(row["serial_number"].get<string>())};
     auto& drive_stats{model_stats.drives[std::move(serial_number)]};
@@ -126,19 +133,23 @@ static vector<string> MakeParsedStatsHeader() {
 //
 static auto MakeParsedStatsRow(const string& model_name,
                                const string& serial_number,
+                               uint64_t capacity_bytes,
                                const DriveStats& drive_stats) {
+  constexpr auto num_to_str{
+      [](const auto number) { return fmt::format("{}", number); }};
+
   vector<string> row;
   row.reserve(size(kOutputPrefix) + kCounterCount);
   row.push_back(model_name);
   row.push_back(serial_number);
+  row.push_back(num_to_str(capacity_bytes));
 
   const Date failure_date{drive_stats.failure_date.value_or(Date{})};
-  row.emplace_back(fmt::format("{}", failure_date.year));
-  row.emplace_back(fmt::format("{}", failure_date.month));
-  row.emplace_back(fmt::format("{}", failure_date.day));
+  row.emplace_back(num_to_str(failure_date.year));
+  row.emplace_back(num_to_str(failure_date.month));
+  row.emplace_back(num_to_str(failure_date.day));
 
-  ranges::transform(drive_stats.drive_day, back_inserter(row),
-                    [](uint64_t number) { return fmt::format("{}", number); });
+  ranges::transform(drive_stats.drive_day, back_inserter(row), num_to_str);
   return row;
 }
 
@@ -153,7 +164,8 @@ void WriteParsedStats(const ModelMap& map, const filesystem::path& file_path) {
 
   for (const auto& [model_name, model_stats] : map) {
     for (const auto& [serial_number, drive_stats] : model_stats.drives) {
-      writer << MakeParsedStatsRow(model_name, serial_number, drive_stats);
+      writer << MakeParsedStatsRow(model_name, serial_number,
+                                   model_stats.capacity_bytes, drive_stats);
     }
   }
 
@@ -165,7 +177,9 @@ void WriteParsedStats(const ModelMap& map, const filesystem::path& file_path) {
 //
 void MergeParsedStats(ModelMap& map, const ModelMap& other) {
   for (const auto& [model_name, other_model_stats] : other) {
-    auto& model_stats{map[model_name]};
+    auto& model_stats{
+        map.try_emplace(model_name, other_model_stats.capacity_bytes)
+            .first->second};
 
     for (const auto& [serial_number, other_drive_stats] :
          other_model_stats.drives) {
