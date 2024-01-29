@@ -29,12 +29,12 @@ int main(int argc, char* argv[]) {
     fmt::print("Output: {}\n", output.string());
 
     const util::Timer<chrono::seconds> timer;
-    const bb::ModelMap model_map{[&input] {
+    const bb::DataCenterStats model_map{[&input] {
       if (is_directory(input)) {
         return ParseRawStats(filesystem::recursive_directory_iterator{input});
       }
 
-      bb::ModelMap map;
+      bb::DataCenterStats map;
       ReadRawStats(map, input);
       return map;
     }()};
@@ -156,25 +156,7 @@ static void UpdateCapacity(const ModelName& model_name,
 //
 //
 //
-static void UpdateFailureDate(const ModelName& model_name,
-                              const SerialNumber& serial_number,
-                              DriveStats& drive_stats,
-                              Date new_date) {
-  if (auto& failure_date = drive_stats.failure_date; new_date > failure_date) {
-    if (failure_date) {
-      fmt::print("{} S/N {} multiple failure: was {}, now {}\n", model_name,
-                 serial_number, util::ToString(*failure_date),
-                 util::ToString(new_date));
-    }
-
-    failure_date = new_date;
-  }
-}
-
-//
-//
-//
-void ReadRawStats(ModelMap& map, const filesystem::path& file_path) {
+void ReadRawStats(DataCenterStats& dc_stats, const filesystem::path& file_path) {
   ifstream input{file_path, ios::binary};
   input.exceptions(ios::badbit | ios::failbit);
 
@@ -183,7 +165,7 @@ void ReadRawStats(ModelMap& map, const filesystem::path& file_path) {
 
   for (size_t idx = 0; idx < row_count; ++idx) {
     const auto model_name{ReadId(doc, "model", idx)};
-    auto& model_stats{map[model_name]};
+    auto& model_stats{dc_stats.models[model_name]};
 
     if (const auto capacity_bytes = ReadCapacity(doc, idx); capacity_bytes) {
       UpdateCapacity(model_name, model_stats, *capacity_bytes);
@@ -207,7 +189,9 @@ void ReadRawStats(ModelMap& map, const filesystem::path& file_path) {
     ++drive_stats.drive_day[year_idx * kMonthPerYear + month_idx];
 
     if (doc.GetCell<int>("failure", idx) != 0) {
-      UpdateFailureDate(model_name, serial_number, drive_stats, date);
+      auto& failure_date{drive_stats.failure_date};
+      failure_date.push_back(date);
+      dc_stats.UpdateMaxFailure(size(failure_date));
     }
   }
 }
@@ -215,12 +199,18 @@ void ReadRawStats(ModelMap& map, const filesystem::path& file_path) {
 //
 //
 //
-static vector<string> MakeParsedStatsHeader() {
+static vector<string> MakeParsedStatsHeader(const DataCenterStats& dc_stats) {
+  const size_t max_failure{dc_stats.max_failure};
+
   vector<string> header;
-  header.reserve(size(kOutputPrefix) + kCounterCount);
+  header.reserve(size(kOutputPrefix) + max_failure + kCounterCount);
 
   for (const auto& prefix : kOutputPrefix) {
     header.emplace_back(prefix);
+  }
+
+  for (size_t idx = 0; idx < max_failure; ++idx) {
+    header.push_back(fmt::format("failure_{}", idx));
   }
 
   for (auto year = kFirstYear; year <= kLastYear; ++year) {
@@ -235,17 +225,28 @@ static vector<string> MakeParsedStatsHeader() {
 //
 //
 //
-static auto MakeParsedStatsRow(const string& model_name,
+static auto MakeParsedStatsRow(const DataCenterStats& dc_stats,
+                               const string& model_name,
                                const ModelStats& model_stats,
                                const string& serial_number,
                                const DriveStats& drive_stats) {
+  const size_t max_failure{dc_stats.max_failure};
+
   vector<string> row;
-  row.reserve(size(kOutputPrefix) + kCounterCount);
+  row.reserve(size(kOutputPrefix) + dc_stats.max_failure + kCounterCount);
+
   row.push_back(model_name);
   row.push_back(serial_number);
   row.push_back(util::ToString(model_stats.capacity_bytes));
   row.push_back(util::ToString(drive_stats.initial_power_on_hour));
-  row.push_back(util::ToString(drive_stats.failure_date));
+
+  const auto& failure_date{drive_stats.failure_date};
+  for (const auto& date : failure_date) {
+    row.push_back(util::ToString(date));
+  }
+
+  row.insert(end(row), max_failure - size(failure_date), "");
+
   ranges::transform(drive_stats.drive_day, back_inserter(row),
                     [](uint64_t number) {
                       return number == 0 ? "" : util::ToString(number);
@@ -256,19 +257,21 @@ static auto MakeParsedStatsRow(const string& model_name,
 //
 //
 //
-void WriteParsedStats(const ModelMap& map, const filesystem::path& file_path) {
+void WriteParsedStats(const DataCenterStats& dc_stats,
+                      const filesystem::path& file_path) {
   rapidcsv::Document doc;
 
-  const vector header{MakeParsedStatsHeader()};
+  const vector header{MakeParsedStatsHeader(dc_stats)};
   for (size_t idx = 0; idx < size(header); ++idx) {
     doc.SetColumnName(idx, header[idx]);
   }
 
   size_t row_idx = 0;
-  for (const auto& [model_name, model_stats] : map) {
+  for (const auto& [model_name, model_stats] : dc_stats.models) {
     for (const auto& [serial_number, drive_stats] : model_stats.drives) {
-      doc.SetRow(row_idx++, MakeParsedStatsRow(model_name, model_stats,
-                                               serial_number, drive_stats));
+      vector row{MakeParsedStatsRow(dc_stats, model_name, model_stats,
+                                    serial_number, drive_stats)};
+      doc.SetRow(row_idx++, move(row));
     }
   }
 
@@ -280,9 +283,11 @@ void WriteParsedStats(const ModelMap& map, const filesystem::path& file_path) {
 //
 //
 //
-void MergeParsedStats(ModelMap& map, const ModelMap& other) {
-  for (const auto& [model_name, other_model_stats] : other) {
-    auto& model_stats{map[model_name]};
+void MergeParsedStats(DataCenterStats& dc_stats,
+                      const DataCenterStats& other_stats) {
+  for (const auto& [model_name, other_model_stats] : other_stats.models) {
+    auto& model_stats{dc_stats.models[model_name]};
+    dc_stats.UpdateMaxFailure(other_stats.max_failure);
 
     auto& capacity_bytes{model_stats.capacity_bytes};
     if (const auto& other_capacity_bytes = other_model_stats.capacity_bytes;
@@ -302,11 +307,11 @@ void MergeParsedStats(ModelMap& map, const ModelMap& other) {
       ranges::transform(drive_day, other_drive_stats.drive_day,
                         begin(drive_day), plus<uint64_t>{});
 
-      if (const auto& other_failure_date = other_drive_stats.failure_date;
-          other_failure_date) {
-        UpdateFailureDate(model_name, serial_number, drive_stats,
-                          *other_failure_date);
-      }
+      auto& failure_date{drive_stats.failure_date};
+      const auto& other_failure_date{other_drive_stats.failure_date};
+      failure_date.insert(end(failure_date), begin(other_failure_date),
+                          end(other_failure_date));
+      dc_stats.UpdateMaxFailure(size(failure_date));
     }
   }
 }

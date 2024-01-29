@@ -147,9 +147,8 @@ inline constexpr size_t kCounterCount{(kLastYear - kFirstYear + 1) *
 //
 //
 //
-inline constexpr std::array kOutputPrefix{"model", "serial_number",
-                                          "capacity_bytes",
-                                          "initial_power_on_hour", "failure"};
+inline constexpr std::array kOutputPrefix{
+    "model", "serial_number", "capacity_bytes", "initial_power_on_hour"};
 
 //
 //
@@ -162,7 +161,7 @@ struct DriveStats {
 
   Counters drive_day;
   std::optional<uint64_t> initial_power_on_hour;
-  std::optional<Date> failure_date;
+  std::vector<Date> failure_date;
 };
 
 //
@@ -184,12 +183,28 @@ struct ModelStats {
 //
 //
 using ModelName = std::string;
-using ModelMap = ankerl::unordered_dense::map<ModelName, ModelStats>;
 
 //
 //
 //
-void ReadRawStats(ModelMap& map, const std::filesystem::path& file_path);
+struct DataCenterStats {
+  using ModelMap = ankerl::unordered_dense::map<ModelName, ModelStats>;
+
+  ModelMap models;
+  uint64_t max_failure = 0;
+
+  void UpdateMaxFailure(size_t failure_count) noexcept {
+    if (failure_count > max_failure) {
+      max_failure = failure_count;
+    }
+  }
+};
+
+//
+//
+//
+void ReadRawStats(DataCenterStats& dc_stats,
+                  const std::filesystem::path& file_path);
 
 //
 //
@@ -199,19 +214,20 @@ void ReadParsedStats(ModelStats& map, const std::filesystem::path& file_path);
 //
 //
 //
-void WriteParsedStats(const ModelMap& map,
+void WriteParsedStats(const DataCenterStats& dc_stats,
                       const std::filesystem::path& file_path);
 //
 //
 //
-void MergeParsedStats(ModelMap& map, const ModelMap& other);
+void MergeParsedStats(DataCenterStats& dc_stats,
+                      const DataCenterStats& other_stats);
 }  // namespace bb
 
 //
 //
 //
 template <std::input_iterator DirIt>
-bb::ModelMap ParseRawStats(DirIt it) {
+bb::DataCenterStats ParseRawStats(DirIt it) {
   const auto thread_count{std::thread::hardware_concurrency()};
 
   std::mutex it_mutex;
@@ -232,12 +248,11 @@ bb::ModelMap ParseRawStats(DirIt it) {
     return csv_path;
   }};
 
-  std::vector<bb::ModelMap> maps(thread_count);
+  std::vector<bb::DataCenterStats> dc_stats(thread_count);
   std::vector<std::thread> workers(thread_count);
 
   for (size_t idx = 0; idx < thread_count; ++idx) {
-    workers[idx] = std::thread{[idx, &maps, &get_next_file_path]() {
-      auto& stats{maps[idx]};
+    workers[idx] = std::thread{[idx, &dc_stats, &get_next_file_path]() {
       for (;;) {
         try {
           const std::filesystem::path file_path{get_next_file_path()};
@@ -245,7 +260,7 @@ bb::ModelMap ParseRawStats(DirIt it) {
             break;
           }
 
-          ReadRawStats(stats, file_path);
+          ReadRawStats(dc_stats[idx], file_path);
 
         } catch (...) {
           util::print_exception(std::current_exception());
@@ -258,8 +273,8 @@ bb::ModelMap ParseRawStats(DirIt it) {
     worker.join();
   }
 
-  bb::ModelMap result;
-  for (auto& stats : maps) {
+  bb::DataCenterStats result;
+  for (auto& stats : dc_stats) {
     MergeParsedStats(result, stats);
   }
 
