@@ -11,8 +11,8 @@ set(Boost_USE_STATIC_LIBS ON)
 
 find_package(Boost REQUIRED COMPONENTS)
 find_package(fmt CONFIG REQUIRED)
+find_path(RAPIDCSV_INCLUDE_DIRS "rapidcsv.h")
 
-add_subdirectory(csv-parser)
 add_subdirectory(unordered_dense)
 
 add_executable (Backblaze
@@ -21,8 +21,10 @@ add_executable (Backblaze
 
 target_compile_features(Backblaze PRIVATE cxx_std_20)
 
+target_include_directories(Backblaze PRIVATE
+		${RAPIDCSV_INCLUDE_DIRS})
+
 target_link_libraries(Backblaze PRIVATE
 		Boost::boost
-		csv
 		fmt::fmt-header-only
 		unordered_dense::unordered_dense)

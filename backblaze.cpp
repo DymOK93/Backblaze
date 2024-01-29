@@ -1,12 +1,11 @@
 ﻿#include "backblaze.hpp"
 
+#include <rapidcsv.h>
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string/split.hpp>
-#include "csv-parser/include/csv.hpp"
 #include "unordered_dense/include/ankerl/unordered_dense.h"
 
 #include <algorithm>
-#include <charconv>
 #include <chrono>
 #include <fstream>
 #include <stdexcept>
@@ -50,9 +49,12 @@ int main(int argc, char* argv[]) {
 }
 
 namespace util {
+//
+//
+//
 void print_exception(std::exception_ptr exc_ptr) noexcept {
   try {
-    rethrow_exception(std::move(exc_ptr));
+    rethrow_exception(exc_ptr);
 
   } catch (const system_error& exc) {
     const error_code ec{exc.code()};
@@ -60,12 +62,6 @@ void print_exception(std::exception_ptr exc_ptr) noexcept {
 
   } catch (const exception& exc) {
     printf("%s\n", exc.what());
-
-  } catch (error_code ec) {
-    /**
-     * TODO: fix csv::MmapParser::next() - throw system_error
-     */
-    printf("Error %d: %s\n", ec.value(), ec.message().c_str());
 
   } catch (...) {
     printf("Unknown exception\n");
@@ -77,54 +73,30 @@ namespace bb {
 //
 //
 //
-template <class Ty, enable_if_t<is_integral_v<Ty>, int> = 0>
-static Ty ToInt(string_view str) {
-  Ty value;
-  if (const auto [_, ec] = from_chars(data(str), data(str) + size(str), value);
-      ec != std::errc{}) {
-    throw system_error{make_error_code(ec)};
-  }
-  return value;
-}
-
-//
-//
-//
-template <class Ty>
-static string ToString(const Ty& value) {
-  return fmt::format("{}", value);
-}
-
-//
-//
-//
-static Date ReadDate(csv::CSVField field) {
-  vector<string_view> yy_mm_dd;
+static Date ReadDate(const rapidcsv::Document& doc, size_t row_idx) {
+  vector<string> yy_mm_dd;
   yy_mm_dd.reserve(kDateLength);
 
-  split(yy_mm_dd, field.get<string_view>(), boost::is_any_of("-"));
+  split(yy_mm_dd, doc.GetCell<string>("date", row_idx), boost::is_any_of("-"));
   if (size(yy_mm_dd) != kDateLength) {
-    std::cout << field << std::endl;
     throw invalid_argument{"Invalid date format"};
   }
 
   do {
-    const auto year{ToInt<uint16_t>(yy_mm_dd[0])};
+    const auto year{util::ToInt<uint16_t>(yy_mm_dd[0])};
     if (year < kFirstYear || year > kLastYear) {
       break;
     }
 
-    const auto month{ToInt<uint8_t>(yy_mm_dd[1])};
-    if (month < 1 || month > kMonthPerYear) {
+    const auto month{util::ToInt<uint8_t>(yy_mm_dd[1])};
+    const auto day{util::ToInt<uint8_t>(yy_mm_dd[2])};
+
+    const Date date{chrono::year{year}, chrono::month{month}, chrono::day{day}};
+    if (!date.ok()) {
       break;
     }
 
-    const auto day{ToInt<uint8_t>(yy_mm_dd[2])};
-    if (day > kMaxDayPerMonth[month - 1]) {
-      break;
-    }
-
-    return Date{year, month, day};
+    return date;
 
   } while (false);
 
@@ -135,8 +107,10 @@ static Date ReadDate(csv::CSVField field) {
 //
 //
 //
-static string ReadId(csv::CSVField field) {
-  auto id{field.get<string>()};
+static string ReadId(const rapidcsv::Document& doc,
+                     const std::string& field,
+                     size_t row_idx) {
+  auto id{doc.GetCell<string>(field, row_idx)};
   const auto [first, last]{
       std::ranges::remove_if(id, [](unsigned char ch) { return isspace(ch); })};
   id.erase(first, last);
@@ -146,8 +120,9 @@ static string ReadId(csv::CSVField field) {
 //
 //
 //
-static optional<uint64_t> ReadCapacity(csv::CSVField field) {
-  const auto capacity{field.get<int64_t>()};
+static optional<uint64_t> ReadCapacity(const rapidcsv::Document& doc,
+                                       size_t row_idx) {
+  const auto capacity{doc.GetCell<int64_t>("capacity_bytes", row_idx)};
   if (capacity < 0) {
     return nullopt;
   }
@@ -157,57 +132,60 @@ static optional<uint64_t> ReadCapacity(csv::CSVField field) {
 static void UpdateCapacity(const ModelName& model_name,
                            ModelStats& model_stats,
                            uint64_t capacity_bytes) {
-  auto& capacity{model_stats.capacity_bytes};
-  if (capacity && *capacity != capacity_bytes) {
-    fmt::print("{} capacity change: was {}, now {}", model_name, *capacity,
-               capacity_bytes);
+  if (auto& capacity = model_stats.capacity_bytes; capacity_bytes > capacity) {
+    if (capacity) {
+      fmt::print("{} capacity change: was {}, now {}", model_name, *capacity,
+                 capacity_bytes);
+    }
+
+    capacity = capacity_bytes;
   }
-  capacity = capacity_bytes;
 }
 
+//
+//
+//
 static void UpdateFailureDate(const ModelName& model_name,
                               const SerialNumber& serial_number,
                               DriveStats& drive_stats,
                               Date new_date) {
-  auto& failure_date{drive_stats.failure_date};
-  if (failure_date) {
-    fmt::print("{} S/N {} multiple failure: was {}-{}-{}, now {}-{}-{}",
-               model_name, serial_number, failure_date->year,
-               failure_date->month, failure_date->day, new_date.year,
-               new_date.month, new_date.day);
+  auto& failure_date = drive_stats.failure_date;
+  if (!failure_date) {
+    failure_date = new_date;
+  } else {
+    fmt::print("{} S/N {} multiple failure: was {}, now {}", model_name,
+               serial_number, util::ToString(*failure_date),
+               util::ToString(new_date));
   }
-  failure_date = new_date;
 }
 
 //
 //
 //
 void ReadRawStats(ModelMap& map, const filesystem::path& file_path) {
-  /**
-   * TODO: fix CSVReader bugs with std::ifstream and ill-formed rows
-   * @see 2015-01-24.csv#L39279
-   */
-  csv::CSVReader reader{file_path.string(),
-                        csv::CSVFormat{}.header_row(0).delimiter(',')};
+  ifstream input{file_path, ios::binary};
+  input.exceptions(ios::badbit | ios::failbit);
 
-  for (const csv::CSVRow& row : reader) {
-    const auto model_name{ReadId(row["model"])};
+  const rapidcsv::Document doc{input};
+  const size_t row_count{doc.GetRowCount()};
+
+  for (size_t idx = 0; idx < row_count; ++idx) {
+    const auto model_name{ReadId(doc, "model", idx)};
     auto& model_stats{map[model_name]};
 
-    if (const auto capacity_bytes = ReadCapacity(row["capacity_bytes"]);
-        capacity_bytes) {
+    if (const auto capacity_bytes = ReadCapacity(doc, idx); capacity_bytes) {
       UpdateCapacity(model_name, model_stats, *capacity_bytes);
     }
 
-    const auto serial_number{ReadId(row["serial_number"])};
+    const auto serial_number{ReadId(doc, "serial_number", idx)};
     auto& drive_stats{model_stats.drives[serial_number]};
 
-    const auto date{ReadDate(row["date"])};
-    const auto year_idx{static_cast<size_t>(date.year) - kFirstYear};
-    const auto month_idx{static_cast<size_t>(date.month) - 1};
+    const auto date{ReadDate(doc, idx)};
+    const auto year_idx{static_cast<int>(date.year()) - kFirstYear};
+    const auto month_idx{static_cast<unsigned int>(date.month()) - 1};
     ++drive_stats.drive_day[year_idx * kMonthPerYear + month_idx];
 
-    if (row["failure"].get<int>() != 0) {
+    if (doc.GetCell<int>("failure", idx) != 0) {
       UpdateFailureDate(model_name, serial_number, drive_stats, date);
     }
   }
@@ -244,15 +222,16 @@ static auto MakeParsedStatsRow(const string& model_name,
   row.reserve(size(kOutputPrefix) + kCounterCount);
   row.push_back(model_name);
   row.push_back(serial_number);
-  row.push_back(ToString(model_stats.capacity_bytes.value_or(0)));
+  row.push_back(util::ToString(model_stats.capacity_bytes.value_or(0)));
 
-  const Date failure_date{drive_stats.failure_date.value_or(Date{})};
-  row.emplace_back(ToString(failure_date.year));
-  row.emplace_back(ToString(failure_date.month));
-  row.emplace_back(ToString(failure_date.day));
+  if (const auto& date = drive_stats.failure_date; !date) {
+    row.emplace_back("");
+  } else {
+    row.push_back(util::ToString(*date));
+  }
 
   ranges::transform(drive_stats.drive_day, back_inserter(row),
-                    [](const auto number) { return ToString(number); });
+                    [](uint64_t number) { return util::ToString(number); });
   return row;
 }
 
@@ -260,19 +239,24 @@ static auto MakeParsedStatsRow(const string& model_name,
 //
 //
 void WriteParsedStats(const ModelMap& map, const filesystem::path& file_path) {
-  ofstream output{file_path};
-  auto writer{csv::make_csv_writer_buffered(output)};
+  rapidcsv::Document doc;
 
-  writer << MakeParsedStatsHeader();
+  const vector header{MakeParsedStatsHeader()};
+  for (size_t idx = 0; idx < size(header); ++idx) {
+    doc.SetColumnName(idx, header[idx]);
+  }
 
+  size_t row_idx = 0;
   for (const auto& [model_name, model_stats] : map) {
     for (const auto& [serial_number, drive_stats] : model_stats.drives) {
-      writer << MakeParsedStatsRow(model_name, model_stats, serial_number,
-                                   drive_stats);
+      doc.SetRow(row_idx++, MakeParsedStatsRow(model_name, model_stats,
+                                               serial_number, drive_stats));
     }
   }
 
-  writer.flush();
+  ofstream output{file_path, ios::binary};
+  output.exceptions(ios::badbit | ios::failbit);
+  doc.Save(output);
 }
 
 //

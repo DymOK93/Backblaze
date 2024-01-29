@@ -2,13 +2,20 @@
 #include <fmt/format.h>
 #include "unordered_dense/include/ankerl/unordered_dense.h"
 
+#include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <system_error>
 #include <thread>
+
+//
+//
+//
+using Date = std::chrono::year_month_day;
 
 namespace util {
 //
@@ -33,6 +40,37 @@ class Timer {
 //
 //
 void print_exception(std::exception_ptr exc_ptr) noexcept;
+
+//
+//
+//
+template <class Ty, std::enable_if_t<std::is_integral_v<Ty>, int> = 0>
+Ty ToInt(std::string_view str) {
+  Ty value;
+  if (const auto [_, ec] =
+          std::from_chars(data(str), data(str) + size(str), value);
+      ec != std::errc{}) {
+    throw std::system_error{make_error_code(ec)};
+  }
+  return value;
+}
+
+//
+//
+//
+template <class Ty>
+std::string ToString(const Ty& value) {
+  return fmt::format("{}", value);
+}
+
+//
+//
+//
+inline std::string ToString(const Date& date) {
+  return fmt::format("{}-{}-{}", static_cast<int>(date.year()),
+                     static_cast<unsigned int>(date.month()),
+                     static_cast<unsigned int>(date.day()));
+}
 }  // namespace util
 
 namespace bb {
@@ -58,18 +96,8 @@ inline constexpr size_t kCounterCount{(kLastYear - kFirstYear + 1) *
 //
 //
 //
-inline constexpr std::array kOutputPrefix{"model",          "serial_number",
-                                          "capacity_bytes", "failure_year",
-                                          "failure_month",  "failure_day"};
-
-//
-//
-//
-struct Date {
-  uint16_t year = 0;
-  uint8_t month = 0;
-  uint8_t day = 0;
-};
+inline constexpr std::array kOutputPrefix{"model", "serial_number",
+                                          "capacity_bytes", "failure"};
 
 //
 //
