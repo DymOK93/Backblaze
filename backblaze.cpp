@@ -210,7 +210,7 @@ static vector<string> MakeParsedStatsHeader(const DataCenterStats& dc_stats) {
   }
 
   for (size_t idx = 0; idx < max_failure; ++idx) {
-    header.push_back(fmt::format("failure_{}", idx));
+    header.push_back(fmt::format("failure_{}", idx + 1));
   }
 
   for (auto year = kFirstYear; year <= kLastYear; ++year) {
