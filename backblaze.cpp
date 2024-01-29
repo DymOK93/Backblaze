@@ -25,7 +25,8 @@ int main(int argc, char* argv[]) {
       throw invalid_argument{"Only CSV output is supported"};
     }
 
-    fmt::print("Input: {}\nOutput: {}\n", input.string(), output.string());
+    fmt::println("Input: {}", input.string());
+    fmt::println("Output: {}", output.string());
 
     const util::Timer<chrono::seconds> timer;
     const bb::ModelMap model_map{[&input] {
@@ -38,7 +39,7 @@ int main(int argc, char* argv[]) {
       return map;
     }()};
 
-    fmt::print("Finished: {} seconds\n", timer.elapsed().count());
+    fmt::println("Finished: {} seconds", timer.elapsed().count());
     WriteParsedStats(model_map, output);
 
   } catch (...) {
@@ -135,14 +136,17 @@ static optional<uint64_t> ReadCapacity(const rapidcsv::Document& doc,
   return capacity;
 }
 
+//
+//
+//
 static void UpdateCapacity(const ModelName& model_name,
                            ModelStats& model_stats,
                            uint64_t new_capacity) {
   if (auto& capacity_bytes = model_stats.capacity_bytes;
       new_capacity > capacity_bytes) {
     if (capacity_bytes) {
-      fmt::print("{} capacity change: was {}, now {}", model_name,
-                 *capacity_bytes, new_capacity);
+      fmt::println("{} capacity change: was {}, now {}", model_name,
+                   *capacity_bytes, new_capacity);
     }
 
     capacity_bytes = new_capacity;
@@ -156,13 +160,14 @@ static void UpdateFailureDate(const ModelName& model_name,
                               const SerialNumber& serial_number,
                               DriveStats& drive_stats,
                               Date new_date) {
-  auto& failure_date = drive_stats.failure_date;
-  if (!failure_date) {
+  if (auto& failure_date = drive_stats.failure_date; new_date > failure_date) {
+    if (failure_date) {
+      fmt::println("{} S/N {} multiple failure: was {}, now {}", model_name,
+                   serial_number, util::ToString(*failure_date),
+                   util::ToString(new_date));
+    }
+
     failure_date = new_date;
-  } else {
-    fmt::print("{} S/N {} multiple failure: was {}, now {}", model_name,
-               serial_number, util::ToString(*failure_date),
-               util::ToString(new_date));
   }
 }
 
@@ -191,7 +196,7 @@ void ReadRawStats(ModelMap& map, const filesystem::path& file_path) {
                            const auto power_on_hour{
                                doc.GetCell<string>("smart_9_raw", idx)};
                            return power_on_hour.empty()
-                                      ? 0
+                                      ? optional<uint64_t>{}
                                       : util::ToInt<uint64_t>(power_on_hour);
                          }})
             .first->second};
@@ -220,7 +225,7 @@ static vector<string> MakeParsedStatsHeader() {
 
   for (auto year = kFirstYear; year <= kLastYear; ++year) {
     for (uint8_t month = 1; month <= kMonthPerYear; ++month) {
-      header.push_back(fmt::format("Y{}_M{}", year, month));
+      header.push_back(fmt::format("{}-{}", year, month));
     }
   }
 
@@ -238,17 +243,13 @@ static auto MakeParsedStatsRow(const string& model_name,
   row.reserve(size(kOutputPrefix) + kCounterCount);
   row.push_back(model_name);
   row.push_back(serial_number);
-  row.push_back(util::ToString(model_stats.capacity_bytes.value_or(0)));
+  row.push_back(util::ToString(model_stats.capacity_bytes));
   row.push_back(util::ToString(drive_stats.initial_power_on_hour));
-
-  if (const auto& date = drive_stats.failure_date; !date) {
-    row.emplace_back("");
-  } else {
-    row.push_back(util::ToString(*date));
-  }
-
+  row.push_back(util::ToString(drive_stats.failure_date));
   ranges::transform(drive_stats.drive_day, back_inserter(row),
-                    [](uint64_t number) { return util::ToString(number); });
+                    [](uint64_t number) {
+                      return number == 0 ? "" : util::ToString(number);
+                    });
   return row;
 }
 
@@ -303,7 +304,8 @@ void MergeParsedStats(ModelMap& map, const ModelMap& other) {
 
       if (const auto& other_failure_date = other_drive_stats.failure_date;
           other_failure_date) {
-        drive_stats.failure_date = other_failure_date;
+        UpdateFailureDate(model_name, serial_number, drive_stats,
+                          *other_failure_date);
       }
     }
   }

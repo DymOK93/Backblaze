@@ -96,6 +96,14 @@ inline std::string ToString(const Date& date) {
                      static_cast<unsigned int>(date.month()),
                      static_cast<unsigned int>(date.day()));
 }
+
+//
+//
+//
+template <class Ty>
+std::string ToString(const std::optional<Ty>& value) {
+  return value ? ToString(*value) : "";
+}
 }  // namespace util
 
 namespace bb {
@@ -126,16 +134,10 @@ inline constexpr uint64_t kMaxCapacityBytes{BytesToTBytes(40)};
 //
 //
 //
-inline constexpr size_t kDateLength{3};
 inline constexpr uint16_t kFirstYear{2013};
 inline constexpr uint16_t kLastYear{2023};
-
-//
-//
-//
 inline constexpr uint8_t kMonthPerYear{12};
-inline constexpr std::array<uint8_t, kMonthPerYear> kMaxDayPerMonth{
-    31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+inline constexpr uint8_t kDateLength{3};
 
 //
 //
@@ -155,11 +157,11 @@ inline constexpr std::array kOutputPrefix{"model", "serial_number",
 struct DriveStats {
   using Counters = std::vector<uint64_t>;
 
-  DriveStats(uint64_t power_on_hour) noexcept
+  DriveStats(std::optional<uint64_t> power_on_hour) noexcept
       : drive_day(kCounterCount), initial_power_on_hour{power_on_hour} {}
 
   Counters drive_day;
-  uint64_t initial_power_on_hour;
+  std::optional<uint64_t> initial_power_on_hour;
   std::optional<Date> failure_date;
 };
 
@@ -223,7 +225,7 @@ bb::ModelMap ParseRawStats(DirIt it) {
       if (const auto& file_path = dir_entry.path();
           file_path.extension() == ".csv") {
         csv_path = file_path;
-        fmt::print("Processing {}\n", csv_path.string());
+        fmt::println("Processing {}", csv_path.string());
       }
     }
 
