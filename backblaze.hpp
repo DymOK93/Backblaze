@@ -85,26 +85,13 @@ struct DriveStats {
 //
 //
 //
-struct StringHash {
-  using is_transparent = void;
-  using is_avalanching = void;
-
-  [[nodiscard]] uint64_t operator()(std::string_view str) const noexcept {
-    return ankerl::unordered_dense::hash<std::string_view>{}(str);
-  }
-};
-
-//
-//
-//
 using SerialNumber = std::string;
 
 //
 //
 //
 struct ModelStats {
-  using DriveMap = ankerl::unordered_dense::
-      map<SerialNumber, DriveStats, StringHash, std::equal_to<>>;
+  using DriveMap = ankerl::unordered_dense::map<SerialNumber, DriveStats>;
 
   DriveMap drives;
 };
@@ -113,8 +100,7 @@ struct ModelStats {
 //
 //
 using ModelName = std::string;
-using ModelMap = ankerl::unordered_dense::
-    map<ModelName, ModelStats, StringHash, std::equal_to<>>;
+using ModelMap = ankerl::unordered_dense::map<ModelName, ModelStats>;
 
 //
 //

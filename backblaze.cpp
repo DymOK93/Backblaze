@@ -66,11 +66,11 @@ optional<Date> ParseDate(const filesystem::path& file_path) {
 //
 //
 //
-static ModelName NormalizeModelName(ModelName model_name) {
+static std::string RemoveSpaces(std::string str) {
   const auto [first, last]{std::ranges::remove_if(
-      model_name, [](unsigned char ch) { return isspace(ch); })};
-  model_name.erase(first, last);
-  return model_name;
+      str, [](unsigned char ch) { return isspace(ch); })};
+  str.erase(first, last);
+  return str;
 }
 
 //
@@ -85,11 +85,11 @@ void ReadRawStats(ModelMap& map, const filesystem::path& file_path) {
   csv::CSVReader reader{input, csv::CSVFormat{}.header_row(0).delimiter(',')};
 
   for (const csv::CSVRow& row : reader) {
-    auto model_name{NormalizeModelName(row["model"].get<string>())};
+    auto model_name{RemoveSpaces(row["model"].get<string>())};
     auto& model_stats{map[std::move(model_name)]};
 
-    const string_view serial_number{row["serial_number"].get_sv()};
-    auto& drive_stats{model_stats.drives[serial_number]};
+    auto serial_number{RemoveSpaces(row["serial_number"].get<string>())};
+    auto& drive_stats{model_stats.drives[std::move(serial_number)]};
 
     const auto year_idx{static_cast<size_t>(date->year) - kFirstYear};
     const auto month_idx{static_cast<size_t>(date->month) - 1};
