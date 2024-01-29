@@ -122,18 +122,24 @@ static string ReadId(const rapidcsv::Document& doc,
 //
 static optional<uint64_t> ReadCapacity(const rapidcsv::Document& doc,
                                        size_t row_idx) {
-  const auto capacity{doc.GetCell<int64_t>("capacity_bytes", row_idx)};
+  const auto raw_capacity{doc.GetCell<int64_t>("capacity_bytes", row_idx)};
+  if (raw_capacity < 0) {
+    return nullopt;
+  }
+
+  const auto capacity{static_cast<uint64_t>(raw_capacity)};
   if (capacity < kMinCapacityBytes || capacity > kMaxCapacityBytes) {
     return nullopt;
   }
-  return static_cast<uint64_t>(capacity);
+
+  return capacity;
 }
 
 static void UpdateCapacity(const ModelName& model_name,
                            ModelStats& model_stats,
                            uint64_t new_capacity) {
   if (auto& capacity_bytes = model_stats.capacity_bytes;
-             new_capacity > capacity_bytes) {
+      new_capacity > capacity_bytes) {
     if (capacity_bytes) {
       fmt::print("{} capacity change: was {}, now {}", model_name,
                  *capacity_bytes, new_capacity);
@@ -179,7 +185,12 @@ void ReadRawStats(ModelMap& map, const filesystem::path& file_path) {
     }
 
     const auto serial_number{ReadId(doc, "serial_number", idx)};
-    auto& drive_stats{model_stats.drives[serial_number]};
+    auto& drive_stats{model_stats.drives
+                          .try_emplace(serial_number, util::Lazy{[&doc, idx] {
+                                         return doc.GetCell<uint64_t>(
+                                             "smart_9_raw", idx);
+                                       }})
+                          .first->second};
 
     const auto date{ReadDate(doc, idx)};
     const auto year_idx{static_cast<int>(date.year()) - kFirstYear};
@@ -224,6 +235,7 @@ static auto MakeParsedStatsRow(const string& model_name,
   row.push_back(model_name);
   row.push_back(serial_number);
   row.push_back(util::ToString(model_stats.capacity_bytes.value_or(0)));
+  row.push_back(util::ToString(drive_stats.initial_power_on_hour));
 
   if (const auto& date = drive_stats.failure_date; !date) {
     row.emplace_back("");
@@ -275,7 +287,11 @@ void MergeParsedStats(ModelMap& map, const ModelMap& other) {
 
     for (const auto& [serial_number, other_drive_stats] :
          other_model_stats.drives) {
-      auto& drive_stats{model_stats.drives[serial_number]};
+      auto& drive_stats{
+          model_stats.drives
+              .try_emplace(serial_number,
+                           other_drive_stats.initial_power_on_hour)
+              .first->second};
       auto& drive_day{drive_stats.drive_day};
 
       ranges::transform(drive_day, other_drive_stats.drive_day,

@@ -4,6 +4,7 @@
 
 #include <charconv>
 #include <chrono>
+#include <concepts>
 #include <cstdint>
 #include <filesystem>
 #include <mutex>
@@ -39,12 +40,36 @@ class Timer {
 //
 //
 //
+template <std::invocable InitFn>
+class Lazy {
+ public:
+  explicit Lazy(InitFn fn) noexcept(
+      std::is_nothrow_move_constructible_v<InitFn>)
+      : m_fn{std::move(fn)} {}
+
+  operator std::invoke_result_t<InitFn>() && noexcept(
+      std::is_nothrow_invocable_v<InitFn>) {
+    return std::invoke(std::move(m_fn));
+  }
+
+  operator std::invoke_result_t<const InitFn>() const& noexcept(
+      std::is_nothrow_invocable_v<InitFn>) {
+    return std::invoke(m_fn);
+  }
+
+ private:
+  InitFn m_fn;
+};
+
+//
+//
+//
 void print_exception(std::exception_ptr exc_ptr) noexcept;
 
 //
 //
 //
-template <class Ty, std::enable_if_t<std::is_integral_v<Ty>, int> = 0>
+template <std::integral Ty>
 Ty ToInt(std::string_view str) {
   Ty value;
   if (const auto [_, ec] =
@@ -121,7 +146,8 @@ inline constexpr size_t kCounterCount{(kLastYear - kFirstYear + 1) *
 //
 //
 inline constexpr std::array kOutputPrefix{"model", "serial_number",
-                                          "capacity_bytes", "failure"};
+                                          "capacity_bytes",
+                                          "initial_power_on_hour", "failure"};
 
 //
 //
@@ -129,9 +155,11 @@ inline constexpr std::array kOutputPrefix{"model", "serial_number",
 struct DriveStats {
   using Counters = std::vector<uint64_t>;
 
-  DriveStats() noexcept : drive_day(kCounterCount) {}
+  DriveStats(uint64_t power_on_hour) noexcept
+      : drive_day(kCounterCount), initial_power_on_hour{power_on_hour} {}
 
   Counters drive_day;
+  uint64_t initial_power_on_hour;
   std::optional<Date> failure_date;
 };
 
@@ -180,7 +208,7 @@ void MergeParsedStats(ModelMap& map, const ModelMap& other);
 //
 //
 //
-template <class DirIt>
+template <std::input_iterator DirIt>
 bb::ModelMap ParseRawStats(DirIt it) {
   const auto thread_count{std::thread::hardware_concurrency()};
 
