@@ -42,12 +42,36 @@ int main(int argc, char* argv[]) {
     fmt::print("Finished: {} seconds\n", timer.elapsed().count());
     WriteParsedStats(model_map, output);
 
-  } catch (const exception& exc) {
-    printf("%s\n", exc.what());
+  } catch (...) {
+    util::print_exception(current_exception());
     return EXIT_FAILURE;
   }
   return EXIT_SUCCESS;
 }
+
+namespace util {
+void print_exception(std::exception_ptr exc_ptr) noexcept {
+  try {
+    rethrow_exception(std::move(exc_ptr));
+
+  } catch (const system_error& exc) {
+    const error_code ec{exc.code()};
+    printf("%s - error %d: %s\n", exc.what(), ec.value(), ec.message().c_str());
+
+  } catch (const exception& exc) {
+    printf("%s\n", exc.what());
+
+  } catch (error_code ec) {
+    /**
+     * TODO: fix csv::MmapParser::next() - throw system_error
+     */
+    printf("Error %d: %s\n", ec.value(), ec.message().c_str());
+
+  } catch (...) {
+    printf("Unknown exception\n");
+  }
+}
+}  // namespace util
 
 namespace bb {
 //

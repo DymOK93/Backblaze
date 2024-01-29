@@ -28,6 +28,11 @@ class Timer {
  private:
   Clock::time_point m_time_point{Clock::now()};
 };
+
+//
+//
+//
+void print_exception(std::exception_ptr exc_ptr) noexcept;
 }  // namespace util
 
 namespace bb {
@@ -160,8 +165,8 @@ bb::ModelMap ParseRawStats(DirIt it) {
 
           ReadRawStats(stats, file_path);
 
-        } catch (const std::exception& exc) {
-          printf("%s\n", exc.what());
+        } catch (...) {
+          util::print_exception(std::current_exception());
         }
       }
     }};
