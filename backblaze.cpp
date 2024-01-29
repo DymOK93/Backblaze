@@ -74,11 +74,11 @@ static string ToString(const Ty& value) {
 //
 //
 //
-static optional<Date> ReadDateImpl(const csv::CSVField& field) {
+static optional<Date> ReadDateImpl(csv::CSVField field) {
   vector<string_view> yy_mm_dd;
   yy_mm_dd.reserve(kDateLength);
 
-  split(yy_mm_dd, field.get_sv(), boost::is_any_of("-"));
+  split(yy_mm_dd, field.get<string_view>(), boost::is_any_of("-"));
   if (size(yy_mm_dd) != kDateLength)
     return nullopt;
 
