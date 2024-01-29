@@ -185,12 +185,16 @@ void ReadRawStats(ModelMap& map, const filesystem::path& file_path) {
     }
 
     const auto serial_number{ReadId(doc, "serial_number", idx)};
-    auto& drive_stats{model_stats.drives
-                          .try_emplace(serial_number, util::Lazy{[&doc, idx] {
-                                         return doc.GetCell<uint64_t>(
-                                             "smart_9_raw", idx);
-                                       }})
-                          .first->second};
+    auto& drive_stats{
+        model_stats.drives
+            .try_emplace(serial_number, util::Lazy{[&doc, idx] {
+                           const auto power_on_hour{
+                               doc.GetCell<string>("smart_9_raw", idx)};
+                           return power_on_hour.empty()
+                                      ? 0
+                                      : util::ToInt<uint64_t>(power_on_hour);
+                         }})
+            .first->second};
 
     const auto date{ReadDate(doc, idx)};
     const auto year_idx{static_cast<int>(date.year()) - kFirstYear};
