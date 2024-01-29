@@ -53,7 +53,7 @@ inline constexpr size_t kCounterCount{(kLastYear - kFirstYear + 1) *
 //
 //
 //
-inline constexpr std::array<std::string_view, 6> kOutputPrefix{
+inline constexpr std::array kOutputPrefix{
     "model", "serial_number", "failure_year", "failure_month", "failure_day"};
 
 //
