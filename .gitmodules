@@ -1,3 +1,6 @@
 [submodule "unordered_dense"]
 	path = unordered_dense
 	url = https://github.com/martinus/unordered_dense
+[submodule "rapidcsv"]
+	path = rapidcsv
+	url = https://github.com/d99kris/rapidcsv/
