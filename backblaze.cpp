@@ -25,8 +25,8 @@ int main(int argc, char* argv[]) {
       throw invalid_argument{"Only CSV output is supported"};
     }
 
-    fmt::println("Input: {}", input.string());
-    fmt::println("Output: {}", output.string());
+    fmt::print("Input: {}\n", input.string());
+    fmt::print("Output: {}\n", output.string());
 
     const util::Timer<chrono::seconds> timer;
     const bb::ModelMap model_map{[&input] {
@@ -39,7 +39,7 @@ int main(int argc, char* argv[]) {
       return map;
     }()};
 
-    fmt::println("Finished: {} seconds", timer.elapsed().count());
+    fmt::print("Finished: {} seconds\n", timer.elapsed().count());
     WriteParsedStats(model_map, output);
 
   } catch (...) {
@@ -145,8 +145,8 @@ static void UpdateCapacity(const ModelName& model_name,
   if (auto& capacity_bytes = model_stats.capacity_bytes;
       new_capacity > capacity_bytes) {
     if (capacity_bytes) {
-      fmt::println("{} capacity change: was {}, now {}", model_name,
-                   *capacity_bytes, new_capacity);
+      fmt::print("{} capacity change: was {}, now {}\n", model_name,
+                 *capacity_bytes, new_capacity);
     }
 
     capacity_bytes = new_capacity;
@@ -162,9 +162,9 @@ static void UpdateFailureDate(const ModelName& model_name,
                               Date new_date) {
   if (auto& failure_date = drive_stats.failure_date; new_date > failure_date) {
     if (failure_date) {
-      fmt::println("{} S/N {} multiple failure: was {}, now {}", model_name,
-                   serial_number, util::ToString(*failure_date),
-                   util::ToString(new_date));
+      fmt::print("{} S/N {} multiple failure: was {}, now {}\n", model_name,
+                 serial_number, util::ToString(*failure_date),
+                 util::ToString(new_date));
     }
 
     failure_date = new_date;

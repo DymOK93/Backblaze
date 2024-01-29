@@ -225,7 +225,7 @@ bb::ModelMap ParseRawStats(DirIt it) {
       if (const auto& file_path = dir_entry.path();
           file_path.extension() == ".csv") {
         csv_path = file_path;
-        fmt::println("Processing {}", csv_path.string());
+        fmt::print("Processing {}\n", csv_path.string());
       }
     }
 
