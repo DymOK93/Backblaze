@@ -225,7 +225,7 @@ static vector<string> MakeParsedStatsHeader() {
 
   for (auto year = kFirstYear; year <= kLastYear; ++year) {
     for (uint8_t month = 1; month <= kMonthPerYear; ++month) {
-      header.push_back(fmt::format("{}-{}", year, month));
+      header.push_back(fmt::format("date_{}-{}", year, month));
     }
   }
 
