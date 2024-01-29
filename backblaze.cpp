@@ -80,6 +80,7 @@ static Date ReadDate(csv::CSVField field) {
 
   split(yy_mm_dd, field.get<string_view>(), boost::is_any_of("-"));
   if (size(yy_mm_dd) != kDateLength) {
+    std::cout << field << std::endl;
     throw invalid_argument{"Invalid date format"};
   }
 
@@ -158,8 +159,12 @@ static void UpdateFailureDate(const ModelName& model_name,
 //
 //
 void ReadRawStats(ModelMap& map, const filesystem::path& file_path) {
-  ifstream input{file_path, ios::in | ios::binary};
-  csv::CSVReader reader{input, csv::CSVFormat{}.header_row(0).delimiter(',')};
+  /**
+   * TODO: fix CSVReader bugs with std::ifstream and ill-formed rows
+   * @see 2015-01-24.csv#L39279
+   */
+  csv::CSVReader reader{file_path.string(),
+                        csv::CSVFormat{}.header_row(0).delimiter(',')};
 
   for (const csv::CSVRow& row : reader) {
     const auto model_name{ReadId(row["model"])};
