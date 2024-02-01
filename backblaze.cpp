@@ -10,6 +10,7 @@
 #include <chrono>
 #include <fstream>
 #include <stdexcept>
+#include <variant>
 
 using namespace std;
 
@@ -137,26 +138,24 @@ static string ReadId(const rapidcsv::Document& doc,
 //
 //
 //
-static optional<uint64_t> ReadCapacity(const rapidcsv::Document& doc,
-                                       size_t row_idx) {
+static variant<int64_t, uint64_t> ReadCapacity(const rapidcsv::Document& doc,
+                                               size_t row_idx) {
   const auto raw_capacity{doc.GetCell<int64_t>("capacity_bytes", row_idx)};
-  if (raw_capacity < 0) {
-    spdlog::warn("Negative capacity: {} bytes", raw_capacity);
-    return nullopt;
-  }
+  do {
+    if (raw_capacity < 0) {
+      break;
+    }
 
-  const auto capacity{static_cast<uint64_t>(raw_capacity)};
-  if (capacity < kMinCapacityBytes) {
-    spdlog::warn("Too small capacity: {} bytes", capacity);
-    return nullopt;
-  }
+    const auto capacity{static_cast<uint64_t>(raw_capacity)};
+    if (capacity < kMinCapacityBytes || capacity > kMaxCapacityBytes) {
+      break;
+    }
 
-  if (capacity > kMaxCapacityBytes) {
-    spdlog::warn("Too large capacity: {} bytes", capacity);
-    return nullopt;
-  }
+    return capacity;
 
-  return capacity;
+  } while (false);
+
+  return raw_capacity;
 }
 
 //
@@ -192,7 +191,12 @@ void ReadRawStats(DataCenterStats& dc_stats,
     const auto model_name{ReadId(doc, "model", idx)};
     auto& model_stats{dc_stats.models[model_name]};
 
-    UpdateCapacity(model_name, model_stats, ReadCapacity(doc, idx));
+    if (const auto capacity = ReadCapacity(doc, idx);
+        holds_alternative<uint64_t>(capacity)) {
+      UpdateCapacity(model_name, model_stats, get<uint64_t>(capacity));
+    } else {
+      spdlog::warn("{} invalid capacity: {} bytes", get<int64_t>(capacity));
+    }
 
     const auto serial_number{ReadId(doc, "serial_number", idx)};
     auto& drive_stats{
