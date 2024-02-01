@@ -126,11 +126,6 @@ inline constexpr uint8_t kDateLength{3};
 //
 //
 //
-inline constexpr size_t kCounterCount{(kLastYear - kFirstYear + 1) *
-                                      static_cast<size_t>(kMonthPerYear)};
-//
-//
-//
 inline constexpr std::array kOutputPrefix{
     "model", "serial_number", "capacity_bytes", "initial_power_on_hour"};
 
@@ -138,11 +133,16 @@ inline constexpr std::array kOutputPrefix{
 //
 //
 struct DriveStats {
-  using Counters = std::vector<uint64_t>;
+  using Counters = ankerl::unordered_dense::map<uint8_t, uint8_t>;
   using Dates = boost::container::small_vector<Date, 1>;
 
+  static constexpr size_t kCounterCount{(kLastYear - kFirstYear + 1) *
+                                        static_cast<size_t>(kMonthPerYear)};
+  static_assert(kCounterCount <= std::numeric_limits<Counters::key_type>::max(),
+                "Too many counters");
+
   DriveStats(std::optional<uint64_t> power_on_hour) noexcept
-      : drive_day(kCounterCount), initial_power_on_hour{power_on_hour} {}
+      : initial_power_on_hour{power_on_hour} {}
 
   Counters drive_day;
   std::optional<uint64_t> initial_power_on_hour;

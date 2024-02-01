@@ -213,7 +213,8 @@ void ReadRawStats(DataCenterStats& dc_stats,
     const auto date{ReadDate(doc, idx)};
     const auto year_idx{static_cast<int>(date.year()) - kFirstYear};
     const auto month_idx{static_cast<unsigned int>(date.month()) - 1};
-    ++drive_stats.drive_day[year_idx * kMonthPerYear + month_idx];
+    ++drive_stats.drive_day[static_cast<uint8_t>(year_idx * kMonthPerYear +
+                                                 month_idx)];
 
     if (doc.GetCell<int>("failure", idx) != 0) {
       auto& failure_date{drive_stats.failure_date};
@@ -230,7 +231,7 @@ static vector<string> MakeParsedStatsHeader(const DataCenterStats& dc_stats) {
   const size_t max_failure{dc_stats.max_failure};
 
   vector<string> header;
-  header.reserve(size(kOutputPrefix) + max_failure + kCounterCount);
+  header.reserve(size(kOutputPrefix) + max_failure + DriveStats::kCounterCount);
 
   for (const auto& prefix : kOutputPrefix) {
     header.emplace_back(prefix);
@@ -260,7 +261,8 @@ static auto MakeParsedStatsRow(const DataCenterStats& dc_stats,
   const size_t max_failure{dc_stats.max_failure};
 
   vector<string> row;
-  row.reserve(size(kOutputPrefix) + dc_stats.max_failure + kCounterCount);
+  row.reserve(size(kOutputPrefix) + dc_stats.max_failure +
+              DriveStats::kCounterCount);
 
   row.push_back(model_name);
   row.push_back(serial_number);
@@ -274,10 +276,15 @@ static auto MakeParsedStatsRow(const DataCenterStats& dc_stats,
 
   row.insert(end(row), max_failure - size(failure_date), "");
 
-  ranges::transform(drive_stats.drive_day, back_inserter(row),
-                    [](uint64_t number) {
-                      return number == 0 ? "" : util::ToString(number);
-                    });
+  vector<uint8_t> drive_day(DriveStats::kCounterCount);
+  for (const auto& [idx, value] : drive_stats.drive_day) {
+    drive_day[idx] = value;
+  }
+
+  ranges::transform(drive_day, back_inserter(row), [](uint64_t number) {
+    return number == 0 ? "" : util::ToString(number);
+  });
+
   return row;
 }
 
@@ -324,13 +331,12 @@ void MergeParsedStats(DataCenterStats& dc_stats,
                            other_drive_stats.initial_power_on_hour)
               .first->second};
       auto& drive_day{drive_stats.drive_day};
-
-      ranges::transform(drive_day, other_drive_stats.drive_day,
-                        begin(drive_day), plus{});
+      for (const auto& [idx, value] : other_drive_stats.drive_day) {
+        drive_day[idx] += value;
+      }
 
       auto& failure_date{drive_stats.failure_date};
       const auto& other_failure_date{other_drive_stats.failure_date};
-
       const auto middle{failure_date.insert(end(failure_date),
                                             begin(other_failure_date),
                                             end(other_failure_date))};
