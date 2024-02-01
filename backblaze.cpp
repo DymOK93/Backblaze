@@ -195,7 +195,8 @@ void ReadRawStats(DataCenterStats& dc_stats,
         holds_alternative<uint64_t>(capacity)) {
       UpdateCapacity(model_name, model_stats, get<uint64_t>(capacity));
     } else {
-      spdlog::warn("{} invalid capacity: {} bytes", get<int64_t>(capacity));
+      spdlog::warn("{} invalid capacity: {} bytes", model_name,
+                   get<int64_t>(capacity));
     }
 
     const auto serial_number{ReadId(doc, "serial_number", idx)};
