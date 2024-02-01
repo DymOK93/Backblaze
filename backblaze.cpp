@@ -1,6 +1,7 @@
 ﻿#include "backblaze.hpp"
 
 #include <rapidcsv.h>
+#include <spdlog/stopwatch.h>
 #include <boost/algorithm/string/classification.hpp>
 #include <boost/algorithm/string/split.hpp>
 #include "unordered_dense/include/ankerl/unordered_dense.h"
@@ -14,6 +15,8 @@ using namespace std;
 
 int main(int argc, char* argv[]) {
   try {
+    spdlog::set_pattern("[%T.%e] [T%t] [%^%l%$] %v");
+
     if (argc != 3) {
       throw invalid_argument{"Usage: <input-path> <output-path>"};
     }
@@ -25,10 +28,10 @@ int main(int argc, char* argv[]) {
       throw invalid_argument{"Only CSV output is supported"};
     }
 
-    fmt::print("Input: {}\n", input.string());
-    fmt::print("Output: {}\n", output.string());
+    spdlog::info("Input: {}", input.string());
+    spdlog::info("Output: {}", output.string());
 
-    const util::Timer<chrono::seconds> timer;
+    const spdlog::stopwatch timer;
     const bb::DataCenterStats model_map{[&input] {
       if (is_directory(input)) {
         return ParseRawStats(filesystem::recursive_directory_iterator{input});
@@ -39,11 +42,11 @@ int main(int argc, char* argv[]) {
       return map;
     }()};
 
-    fmt::print("Finished: {} seconds\n", timer.elapsed().count());
+    info("Finished: {:.3} seconds", timer);
     WriteParsedStats(model_map, output);
 
   } catch (...) {
-    util::print_exception(current_exception());
+    util::PrintException(current_exception());
     return EXIT_FAILURE;
   }
   return EXIT_SUCCESS;
@@ -53,19 +56,32 @@ namespace util {
 //
 //
 //
-void print_exception(std::exception_ptr exc_ptr) noexcept {
+void PrintExceptionImpl(const exception_ptr& exc_ptr) {
   try {
     rethrow_exception(exc_ptr);
 
   } catch (const system_error& exc) {
     const error_code ec{exc.code()};
-    printf("%s - error %d: %s\n", exc.what(), ec.value(), ec.message().c_str());
+    spdlog::error("{} - code {}: {}", exc.what(), ec.value(),
+                  ec.message().c_str());
 
   } catch (const exception& exc) {
-    printf("%s\n", exc.what());
+    spdlog::error("{}", exc.what());
 
   } catch (...) {
-    printf("Unknown exception\n");
+    spdlog::error("Unknown exception");
+  }
+}
+
+//
+//
+//
+void PrintException(const exception_ptr& exc_ptr) noexcept {
+  try {
+    PrintExceptionImpl(exc_ptr);
+
+  } catch (const std::bad_alloc&) {
+    printf("Can't print exception: allocation failure\n");
   }
 }
 }  // namespace util
@@ -109,11 +125,11 @@ static Date ReadDate(const rapidcsv::Document& doc, size_t row_idx) {
 //
 //
 static string ReadId(const rapidcsv::Document& doc,
-                     const std::string& field,
+                     const string& field,
                      size_t row_idx) {
   auto id{doc.GetCell<string>(field, row_idx)};
   const auto [first, last]{
-      std::ranges::remove_if(id, [](unsigned char ch) { return isspace(ch); })};
+      ranges::remove_if(id, [](unsigned char ch) { return isspace(ch); })};
   id.erase(first, last);
   return id;
 }
@@ -125,11 +141,18 @@ static optional<uint64_t> ReadCapacity(const rapidcsv::Document& doc,
                                        size_t row_idx) {
   const auto raw_capacity{doc.GetCell<int64_t>("capacity_bytes", row_idx)};
   if (raw_capacity < 0) {
+    spdlog::warn("Negative capacity: {} bytes", raw_capacity);
     return nullopt;
   }
 
   const auto capacity{static_cast<uint64_t>(raw_capacity)};
-  if (capacity < kMinCapacityBytes || capacity > kMaxCapacityBytes) {
+  if (capacity < kMinCapacityBytes) {
+    spdlog::warn("Too small capacity: {} bytes", capacity);
+    return nullopt;
+  }
+
+  if (capacity > kMaxCapacityBytes) {
+    spdlog::warn("Too large capacity: {} bytes", capacity);
     return nullopt;
   }
 
@@ -141,12 +164,13 @@ static optional<uint64_t> ReadCapacity(const rapidcsv::Document& doc,
 //
 static void UpdateCapacity(const ModelName& model_name,
                            ModelStats& model_stats,
-                           uint64_t new_capacity) {
+                           optional<uint64_t> new_capacity) {
   if (auto& capacity_bytes = model_stats.capacity_bytes;
       new_capacity > capacity_bytes) {
     if (capacity_bytes) {
-      fmt::print("{} capacity change: was {}, now {}\n", model_name,
-                 *capacity_bytes, new_capacity);
+      spdlog::warn(
+          "{} capacity change: was {}, now {}", model_name, *capacity_bytes,
+          *new_capacity);  // NOLINT(bugprone-unchecked-optional-access)
     }
 
     capacity_bytes = new_capacity;
@@ -156,7 +180,8 @@ static void UpdateCapacity(const ModelName& model_name,
 //
 //
 //
-void ReadRawStats(DataCenterStats& dc_stats, const filesystem::path& file_path) {
+void ReadRawStats(DataCenterStats& dc_stats,
+                  const filesystem::path& file_path) {
   ifstream input{file_path, ios::binary};
   input.exceptions(ios::badbit | ios::failbit);
 
@@ -167,9 +192,7 @@ void ReadRawStats(DataCenterStats& dc_stats, const filesystem::path& file_path) 
     const auto model_name{ReadId(doc, "model", idx)};
     auto& model_stats{dc_stats.models[model_name]};
 
-    if (const auto capacity_bytes = ReadCapacity(doc, idx); capacity_bytes) {
-      UpdateCapacity(model_name, model_stats, *capacity_bytes);
-    }
+    UpdateCapacity(model_name, model_stats, ReadCapacity(doc, idx));
 
     const auto serial_number{ReadId(doc, "serial_number", idx)};
     auto& drive_stats{
@@ -190,7 +213,7 @@ void ReadRawStats(DataCenterStats& dc_stats, const filesystem::path& file_path) 
 
     if (doc.GetCell<int>("failure", idx) != 0) {
       auto& failure_date{drive_stats.failure_date};
-      failure_date.push_back(date);
+      failure_date.insert(ranges::upper_bound(failure_date, date), date);
       dc_stats.UpdateMaxFailure(size(failure_date));
     }
   }
@@ -271,7 +294,7 @@ void WriteParsedStats(const DataCenterStats& dc_stats,
     for (const auto& [serial_number, drive_stats] : model_stats.drives) {
       vector row{MakeParsedStatsRow(dc_stats, model_name, model_stats,
                                     serial_number, drive_stats)};
-      doc.SetRow(row_idx++, move(row));
+      doc.SetRow(row_idx++, row);
     }
   }
 
@@ -287,13 +310,7 @@ void MergeParsedStats(DataCenterStats& dc_stats,
                       const DataCenterStats& other_stats) {
   for (const auto& [model_name, other_model_stats] : other_stats.models) {
     auto& model_stats{dc_stats.models[model_name]};
-    dc_stats.UpdateMaxFailure(other_stats.max_failure);
-
-    auto& capacity_bytes{model_stats.capacity_bytes};
-    if (const auto& other_capacity_bytes = other_model_stats.capacity_bytes;
-        other_capacity_bytes > capacity_bytes) {
-      capacity_bytes = other_capacity_bytes;
-    }
+    UpdateCapacity(model_name, model_stats, other_model_stats.capacity_bytes);
 
     for (const auto& [serial_number, other_drive_stats] :
          other_model_stats.drives) {
@@ -305,12 +322,16 @@ void MergeParsedStats(DataCenterStats& dc_stats,
       auto& drive_day{drive_stats.drive_day};
 
       ranges::transform(drive_day, other_drive_stats.drive_day,
-                        begin(drive_day), plus<uint64_t>{});
+                        begin(drive_day), plus{});
 
       auto& failure_date{drive_stats.failure_date};
       const auto& other_failure_date{other_drive_stats.failure_date};
-      failure_date.insert(end(failure_date), begin(other_failure_date),
-                          end(other_failure_date));
+
+      const auto middle{failure_date.insert(end(failure_date),
+                                            begin(other_failure_date),
+                                            end(other_failure_date))};
+      ranges::inplace_merge(failure_date, middle);
+
       dc_stats.UpdateMaxFailure(size(failure_date));
     }
   }

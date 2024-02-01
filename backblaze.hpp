@@ -1,5 +1,7 @@
 #pragma once
 #include <fmt/format.h>
+#include <spdlog/spdlog.h>
+#include <boost/container/small_vector.hpp>
 #include "unordered_dense/include/ankerl/unordered_dense.h"
 
 #include <charconv>
@@ -19,24 +21,6 @@
 using Date = std::chrono::year_month_day;
 
 namespace util {
-//
-//
-//
-template <class Duration>
-class Timer {
-  using Clock = std::chrono::high_resolution_clock;
-
- public:
-  Timer() = default;
-
-  [[nodiscard]] Duration elapsed() const noexcept {
-    return std::chrono::duration_cast<Duration>(Clock::now() - m_time_point);
-  }
-
- private:
-  Clock::time_point m_time_point{Clock::now()};
-};
-
 //
 //
 //
@@ -64,7 +48,7 @@ class Lazy {
 //
 //
 //
-void print_exception(std::exception_ptr exc_ptr) noexcept;
+void PrintException(const std::exception_ptr& exc_ptr) noexcept;
 
 //
 //
@@ -155,13 +139,14 @@ inline constexpr std::array kOutputPrefix{
 //
 struct DriveStats {
   using Counters = std::vector<uint64_t>;
+  using Dates = boost::container::small_vector<Date, 1>;
 
   DriveStats(std::optional<uint64_t> power_on_hour) noexcept
       : drive_day(kCounterCount), initial_power_on_hour{power_on_hour} {}
 
   Counters drive_day;
   std::optional<uint64_t> initial_power_on_hour;
-  std::vector<Date> failure_date;
+  Dates failure_date;
 };
 
 //
@@ -241,7 +226,6 @@ bb::DataCenterStats ParseRawStats(DirIt it) {
       if (const auto& file_path = dir_entry.path();
           file_path.extension() == ".csv") {
         csv_path = file_path;
-        fmt::print("Processing {}\n", csv_path.string());
       }
     }
 
@@ -260,10 +244,11 @@ bb::DataCenterStats ParseRawStats(DirIt it) {
             break;
           }
 
+          spdlog::info("Processing {}", file_path.string());
           ReadRawStats(dc_stats[idx], file_path);
 
         } catch (...) {
-          util::print_exception(std::current_exception());
+          util::PrintException(std::current_exception());
         }
       }
     }};

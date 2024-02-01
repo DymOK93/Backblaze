@@ -11,6 +11,7 @@ set(Boost_USE_STATIC_LIBS ON)
 
 find_package(Boost REQUIRED COMPONENTS)
 find_package(fmt CONFIG REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
 
 add_subdirectory(rapidcsv)
 add_subdirectory(unordered_dense)
@@ -25,4 +26,5 @@ target_link_libraries(Backblaze PRIVATE
 		Boost::boost
 		fmt::fmt-header-only
 		rapidcsv
+		spdlog::spdlog_header_only
 		unordered_dense::unordered_dense)
