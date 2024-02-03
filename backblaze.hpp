@@ -94,15 +94,15 @@ namespace bb {
 //
 //
 //
-constexpr uint64_t BytesToGBytes(uint64_t bytes_count) noexcept {
-  return bytes_count * 1000 * 1000 * 1000;
+constexpr uint64_t BytesToGBytes(uint64_t count) noexcept {
+  return count * 1000 * 1000 * 1000;
 }
 
 //
 //
 //
-constexpr uint64_t BytesToTBytes(uint64_t bytes_count) noexcept {
-  return BytesToGBytes(bytes_count) * 1000;
+constexpr uint64_t BytesToTBytes(uint64_t count) noexcept {
+  return BytesToGBytes(count) * 1000;
 }
 
 //
