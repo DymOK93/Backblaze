@@ -9,3 +9,10 @@ Tested on Linux x64 (Debian 12) and Windows 10 x64
 
 ## Build
 CMake 3.19 and newer and GCC, Clang or MSVC with C++20 support are required
+
+## Usage
+`Backblaze[.exe] <input_path> <output_path>`
+* `input_path` - path to input file (should have .csv extension) or directory (will be recursively scanned for .csv files)
+* `output_path` - path to output file (should have .csv extension)
+
+Note: recursive mode uses all CPU cores to speed up processing.
