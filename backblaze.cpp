@@ -165,14 +165,37 @@ static void UpdateCapacity(const ModelName& model_name,
                            ModelStats& model_stats,
                            optional<uint64_t> new_capacity) {
   if (auto& capacity_bytes = model_stats.capacity_bytes;
-      new_capacity > capacity_bytes) {
+      new_capacity > capacity_bytes) {  // new_capacity isn't empty
+    const auto new_capacity_bytes{
+        *new_capacity};  // NOLINT(bugprone-unchecked-optional-access)
+
     if (capacity_bytes) {
-      spdlog::warn(
-          "{} capacity change: was {}, now {}", model_name, *capacity_bytes,
-          *new_capacity);  // NOLINT(bugprone-unchecked-optional-access)
+      spdlog::warn("{} capacity change: was {}, now {}", model_name,
+                   *capacity_bytes, new_capacity_bytes);
     }
 
-    capacity_bytes = new_capacity;
+    capacity_bytes = new_capacity_bytes;
+  }
+}
+
+//
+//
+//
+static void UpdateInitialPowerOnHour(const SerialNumber& serial_number,
+                                     DriveStats& drive_stats,
+                                     optional<uint32_t> new_initial_power_on) {
+  if (new_initial_power_on) {
+    const auto new_initial_power_on_hour{*new_initial_power_on};
+    if (auto& initial_power_on_hour = drive_stats.initial_power_on_hour;
+        !initial_power_on_hour) {
+      initial_power_on_hour = new_initial_power_on_hour;
+    } else if (auto& old_initial_power_on_hour = *initial_power_on_hour;
+               old_initial_power_on_hour > new_initial_power_on_hour) {
+      spdlog::trace("{} initial power-on hour change: was {}, now {}",
+                    serial_number, old_initial_power_on_hour,
+                    new_initial_power_on_hour);
+      old_initial_power_on_hour = new_initial_power_on_hour;
+    }
   }
 }
 
@@ -200,16 +223,14 @@ void ReadRawStats(DataCenterStats& dc_stats,
     }
 
     const auto serial_number{ReadId(doc, "serial_number", idx)};
-    auto& drive_stats{
-        model_stats.drives
-            .try_emplace(serial_number, util::Lazy{[&doc, idx] {
-                           const auto power_on_hour{
-                               doc.GetCell<string>("smart_9_raw", idx)};
-                           return power_on_hour.empty()
-                                      ? optional<uint64_t>{}
-                                      : util::ToInt<uint64_t>(power_on_hour);
-                         }})
-            .first->second};
+    auto& drive_stats{model_stats.drives[serial_number]};
+
+    UpdateInitialPowerOnHour(
+        serial_number, drive_stats, util::Lazy{[&doc, idx] {
+          const auto power_on_hour{doc.GetCell<string>("smart_9_raw", idx)};
+          return power_on_hour.empty() ? optional<uint32_t>{}
+                                       : util::ToInt<uint32_t>(power_on_hour);
+        }});
 
     const auto date{ReadDate(doc, idx)};
     const auto year_idx{static_cast<int>(date.year()) - kFirstYear};
@@ -326,11 +347,10 @@ void MergeParsedStats(DataCenterStats& dc_stats,
 
     for (const auto& [serial_number, other_drive_stats] :
          other_model_stats.drives) {
-      auto& drive_stats{
-          model_stats.drives
-              .try_emplace(serial_number,
-                           other_drive_stats.initial_power_on_hour)
-              .first->second};
+      auto& drive_stats{model_stats.drives[serial_number]};
+      UpdateInitialPowerOnHour(serial_number, drive_stats,
+                               other_drive_stats.initial_power_on_hour);
+
       auto& drive_day{drive_stats.drive_day};
       for (const auto& [idx, value] : other_drive_stats.drive_day) {
         drive_day[idx] += value;

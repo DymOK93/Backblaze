@@ -141,11 +141,8 @@ struct DriveStats {
   static_assert(kCounterCount <= std::numeric_limits<Counters::key_type>::max(),
                 "Too many counters");
 
-  DriveStats(std::optional<uint64_t> power_on_hour) noexcept
-      : initial_power_on_hour{power_on_hour} {}
-
+  std::optional<uint32_t> initial_power_on_hour;
   Counters drive_day;
-  std::optional<uint64_t> initial_power_on_hour;
   Dates failure_date;
 };
 
